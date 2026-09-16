@@ -21,7 +21,8 @@ public class PostProcessing : MonoBehaviour {
     private Dictionary<string, Vector3> worldEndOrig = new Dictionary<string, Vector3>();
 
     static readonly string[] CASE_IDS = { "G", "Q", "EX", "EY", "COMBO" };
-    static readonly string[] CASE_LBL = { "Caso G", "Caso Q", "Caso EX", "Caso EY", "Combinacion" };
+
+    private string lastCase = "__init__";
 
     void Start() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
@@ -34,6 +35,16 @@ public class PostProcessing : MonoBehaviour {
         if (Input.GetKeyDown(KeyCode.M)) ToggleMoment();
         if (Input.GetKeyDown(KeyCode.N)) ToggleAxial();
         if (Input.GetKeyDown(KeyCode.C)) CycleCase();
+
+        // Si el caso cambio (tecla C o selector de la ventana), redondea los
+        // diagramas activos al nuevo caso.
+        string cur = loader.activeCase ?? "COMBO";
+        if (cur != lastCase) {
+            lastCase = cur;
+            if (showDeformed) RefreshDeformed();
+            if (showAxial) RefreshAxial();
+            if (showMoment) RefreshMoment();
+        }
     }
 
     /// <summary>Cicla el caso activo: COMBO -> G -> Q -> EX -> EY -> COMBO.
@@ -44,29 +55,6 @@ public class PostProcessing : MonoBehaviour {
         int i = System.Array.IndexOf(CASE_IDS, loader.activeCase ?? "COMBO");
         i = (i + 1) % CASE_IDS.Length;
         loader.activeCase = CASE_IDS[i] == "COMBO" ? null : CASE_IDS[i];
-        if (showDeformed) { RefreshDeformed(); }
-        if (showAxial) { RefreshAxial(); }
-        if (showMoment) { RefreshMoment(); }
-    }
-
-    void OnGUI() {
-        if (loader == null) return;
-        string cur = loader.activeCase ?? "COMBO";
-        GUI.Box(new Rect(320, Screen.height - 46, 300, 40), "Caso activo: " + cur);
-        for (int i = 0; i < CASE_IDS.Length; i++) {
-            bool sel = CASE_IDS[i].Equals(cur);
-            GUI.backgroundColor = sel ? new Color(0.7f, 0.9f, 0.7f) : Color.white;
-            if (GUI.Button(new Rect(320 + i * 80, Screen.height - 42, 76, 30),
-                           CASE_LBL[i])) {
-                loader.activeCase = CASE_IDS[i] == "COMBO" ? null : CASE_IDS[i];
-                if (showDeformed) RefreshDeformed();
-                if (showAxial) RefreshAxial();
-                if (showMoment) RefreshMoment();
-            }
-        }
-        if (showDeformed || showAxial || showMoment)
-            GUI.Label(new Rect(820, Screen.height - 44, 400, 30),
-                      "D/M/N: toggle  C: cambiar caso");
     }
 
     void RefreshDeformed() {

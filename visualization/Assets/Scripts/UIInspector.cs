@@ -3,126 +3,100 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 
+/// <summary>
+/// Ventana de inspeccion (IMGUI) formal, estilo panel de herramienta dentro del
+/// juego: titulo, secciones con encabezado, tabla de fuerzas alineada, demanda/
+/// capacidad con estado coloreado, selector de caso y graficos (curva P-M y
+/// diagramas de fuerzas internas) integrados en la misma ventana.
+/// </summary>
 public class UIInspector : MonoBehaviour {
     public Text txtElementInfo;
     public RawImage pmPlotCanvas;
     public StructuralLoader loader;
 
-    private RawImage diagramCanvas;
+    private bool panelVisible = true;
     private bool slabSelection = false;
     private ElementMono selected;
+    private SlabMono selectedSlab;
     private Material lastHighMat;
-    private bool panelVisible = true;
 
+    private Texture2D pmTex;
+    private Texture2D diagTex;
+
+    private Rect winRect = new Rect(16f, 16f, 680f, 700f);
+    private string lastUICase = "__init__";
+
+    private GUIStyle stHeader;
+    private GUIStyle stBold;
+    private GUIStyle stLabel;
+    private GUIStyle stSection;
+    private GUIStyle stValue;
+
+    static readonly string[] CASE_IDS = { "G", "Q", "EX", "EY", "COMBO" };
+    static readonly string[] CASE_LBL = { "Caso G", "Caso Q", "Caso EX", "Caso EY", "Combinacion" };
     static readonly string[] DIAG_COMPS = { "N", "Vy", "Vz", "T", "My", "Mz" };
-    static readonly string[] DIAG_UNIT  = { "kN", "kN", "kN", "kN-m", "kN-m", "kN-m" };
-    static readonly Color[] DIAG_COL = {
-        new Color(0.15f, 0.35f, 0.85f, 1f),
-        new Color(0.10f, 0.60f, 0.25f, 1f),
-        new Color(0.90f, 0.55f, 0.10f, 1f),
-        new Color(0.65f, 0.25f, 0.75f, 1f),
-        new Color(0.55f, 0.35f, 0.15f, 1f),
-        new Color(0.85f, 0.15f, 0.15f, 1f),
+    static readonly string[] DIAG_UNIT = { "kN", "kN", "kN", "kN-m", "kN-m", "kN-m" };
+    static readonly Color[] ROW_COL = {
+        new Color(0.20f, 0.35f, 0.70f, 1f),
+        new Color(0.15f, 0.55f, 0.25f, 1f),
+        new Color(0.85f, 0.55f, 0.10f, 1f),
+        new Color(0.60f, 0.30f, 0.72f, 1f),
+        new Color(0.60f, 0.38f, 0.15f, 1f),
+        new Color(0.80f, 0.18f, 0.18f, 1f),
     };
 
     void Awake() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
-        SetupPanel();
+        InitStyles();
+        // La informacion ahora se muestra en la ventana IMGUI; ocultamos los
+        // controles uGUI que se crearon para el panel anterior.
+        if (txtElementInfo != null) txtElementInfo.gameObject.SetActive(false);
+        if (pmPlotCanvas != null) pmPlotCanvas.gameObject.SetActive(false);
+        winRect = new Rect(16f, 16f, 680f,
+                           Mathf.Min(700f, Mathf.Max(480f, Screen.height - 32f)));
     }
 
-    /// <summary>
-    /// Panel compacto: ancho medio fijo, alto 70% de la pantalla, fuente
-    /// monoespaciada grande y fondo blanco semitransparente. No tapa la
-    /// estructura (queda al borde izquierdo; tecla P lo oculta/muestra).
-    /// </summary>
-    void SetupPanel() {
-        if (txtElementInfo == null) return;
-        var rt = txtElementInfo.rectTransform;
-        if (rt != null) {
-            float w = Mathf.Clamp(Screen.width * 0.4f, 600f, 740f);
-            float h = Mathf.Clamp(Screen.height * 0.7f, 560f, 920f);
-            rt.sizeDelta = new Vector2(w, h);
-            rt.anchorMin = new Vector2(0f, 1f);
-            rt.anchorMax = new Vector2(0f, 1f);
-            rt.pivot = new Vector2(0f, 1f);
-            rt.anchoredPosition = new Vector2(16f, -16f);
-        }
-        txtElementInfo.color = new Color(0.05f, 0.05f, 0.1f, 1f);
-        txtElementInfo.fontSize = 22;
-        txtElementInfo.lineSpacing = 1.05f;
-        txtElementInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
-        Font mono = null;
-        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 22); }
-        catch (System.Exception) { }
-        if (mono != null) txtElementInfo.font = mono;
-        EnsureBackground(rt);
-        if (pmPlotCanvas != null) {
-            pmPlotCanvas.rectTransform.sizeDelta = new Vector2(320f, 320f);
-            SetupDiagramCanvas();
-        }
+    void InitStyles() {
+        stLabel = new GUIStyle(GUI.skin.label);
+        stLabel.fontSize = 17;
+        stBold = new GUIStyle(stLabel);
+        stBold.fontStyle = FontStyle.Bold;
+        stHeader = new GUIStyle(GUI.skin.box);
+        stHeader.fontStyle = FontStyle.Bold;
+        stHeader.fontSize = 19;
+        stHeader.alignment = TextAnchor.MiddleLeft;
+        stHeader.normal.textColor = new Color(0.08f, 0.10f, 0.25f, 1f);
+        stHeader.normal.background = MakeTex(1, 1, new Color(0.80f, 0.86f, 0.95f, 1f));
+        stSection = new GUIStyle(stBold);
+        stSection.fontSize = 17;
+        stSection.normal.textColor = new Color(0.10f, 0.30f, 0.55f, 1f);
+        stValue = new GUIStyle(stLabel);
+        stValue.alignment = TextAnchor.MiddleRight;
     }
 
-    /// <summary>Crea el canvas de diagramas de fuerzas internas, a la izquierda
-    /// del grafico P-M (esquina inferior derecha).</summary>
-    void SetupDiagramCanvas() {
-        if (pmPlotCanvas == null || pmPlotCanvas.transform.parent == null) return;
-        var parent = pmPlotCanvas.transform.parent;
-        Transform existing = null;
-        for (int i = 0; i < parent.childCount; i++)
-            if (parent.GetChild(i).name == "Diagramas") { existing = parent.GetChild(i); break; }
-        if (existing != null)
-            diagramCanvas = existing.GetComponent<RawImage>();
-        else {
-            var go = new GameObject("Diagramas", typeof(RectTransform),
-                                    typeof(CanvasRenderer), typeof(RawImage));
-            go.transform.SetParent(parent, false);
-            diagramCanvas = go.GetComponent<RawImage>();
-        }
-        var rt = diagramCanvas.rectTransform;
-        rt.anchorMin = new Vector2(1f, 0f);
-        rt.anchorMax = new Vector2(1f, 0f);
-        rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = new Vector2(-356f, 160f);
-        rt.sizeDelta = new Vector2(320f, 320f);
-        diagramCanvas.raycastTarget = false;
-    }
-
-    /// <summary>Crea (o reusa) un Image blanco semitransparente detrás del texto.</summary>
-    void EnsureBackground(RectTransform parent) {
-        if (parent == null) return;
-        Image bg = null;
-        for (int i = 0; i < parent.childCount; i++) {
-            var img = parent.GetChild(i).GetComponent<Image>();
-            if (img != null && img.gameObject.name == "Fondo") { bg = img; break; }
-        }
-        if (bg == null) {
-            var go = new GameObject("Fondo", typeof(RectTransform),
-                                    typeof(CanvasRenderer), typeof(Image));
-            go.transform.SetParent(parent, false);
-            bg = go.GetComponent<Image>();
-            bg.color = new Color(1f, 1f, 1f, 0.88f);
-            bg.raycastTarget = false;
-            bg.transform.SetAsFirstSibling();
-        }
-        bg.rectTransform.anchorMin = Vector2.zero;
-        bg.rectTransform.anchorMax = Vector2.one;
-        bg.rectTransform.offsetMin = Vector2.zero;
-        bg.rectTransform.offsetMax = Vector2.zero;
+    static Texture2D MakeTex(int w, int h, Color c) {
+        var t = new Texture2D(w, h);
+        for (int i = 0; i < w; i++)
+            for (int j = 0; j < h; j++) t.SetPixel(i, j, c);
+        t.Apply();
+        return t;
     }
 
     void Update() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
-        if (Input.GetKeyDown(KeyCode.P)) {
-            panelVisible = !panelVisible;
-            if (txtElementInfo != null) txtElementInfo.gameObject.SetActive(panelVisible);
-            if (pmPlotCanvas != null) pmPlotCanvas.gameObject.SetActive(panelVisible);
-            if (diagramCanvas != null) diagramCanvas.gameObject.SetActive(panelVisible);
-        }
+
+        if (Input.GetKeyDown(KeyCode.P)) panelVisible = !panelVisible;
         if (Input.GetKeyDown(KeyCode.L)) {
             slabSelection = !slabSelection;
             if (loader != null) loader.SetSlabSelection(slabSelection);
         }
-        if (Input.GetMouseButtonDown(0) && loader != null) {
+
+        // Actualizar graficos de la ventana si el caso cambio por tecla C en PostProcessing.
+        string curCase = loader != null && loader.activeCase != null ? loader.activeCase : "COMBO";
+        if (curCase != lastUICase) { lastUICase = curCase; InvalidateTextures(); }
+
+        // Clic fuera de la ventana -> seleccionar elemento/losa.
+        if (Input.GetMouseButtonDown(0) && loader != null && !IsMouseOverWindow()) {
             Ray ray = Camera.main != null
                 ? Camera.main.ScreenPointToRay(Input.mousePosition) : new Ray();
             if (Physics.Raycast(ray, out RaycastHit hit)) {
@@ -130,9 +104,239 @@ public class UIInspector : MonoBehaviour {
                 if (el != null) { SelectElement(el); return; }
                 var sm = hit.collider.GetComponentInParent<SlabMono>();
                 if (sm != null) { SelectSlab(sm); return; }
-                ClearSelection();
+            }
+            ClearSelection();
+        }
+    }
+
+    bool IsMouseOverWindow() {
+        if (!panelVisible) return false;
+        Vector3 mp = Input.mousePosition;
+        mp.y = Screen.height - mp.y;
+        return winRect.Contains(mp);
+    }
+
+    void OnGUI() {
+        if (!panelVisible) return;
+        winRect = GUI.Window(0, winRect, WindowFunc, "INSPECCION ESTRUCTURAL  ·  P1L4 (ED1+ED2)");
+    }
+
+    void WindowFunc(int id) {
+        GUI.DragWindow(new Rect(0f, 0f, winRect.width, 28f));
+        GUILayout.Space(4f);
+
+        if (selectedSlab != null) {
+            DrawSlabInfo();
+            return;
+        }
+        if (selected == null) {
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("Seleccione un elemento de la estructura (clic izquierdo).\n\n" +
+                            "Tambien puede seleccionar losas y voladizos con la tecla L.\n" +
+                            "Teclas:  D deformada · M momentos · N axial · C cambiar caso · P ocultar.", stBold);
+            GUILayout.FlexibleSpace();
+            return;
+        }
+
+        string caso = (loader != null && loader.activeCase != null)
+            ? case_display(loader.activeCase)
+            : (loader != null && loader.data != null ? loader.data.combinacion : "---");
+
+        DrawCaseSelector();
+
+        string tipo = selected.elementType == "column" ? "COLUMNA"
+                    : selected.elementType == "wall" ? "MURO" : "VIGA";
+
+        GUILayout.Label($"{selected.building}  ·  {tipo}  ·  TAG {selected.elementTag}", stHeader);
+        GUILayout.Space(2f);
+        GUILayout.Label($"Caso activo: {caso}", stSection);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"CAD: {selected.cadID}", stLabel);
+        GUILayout.Label($"Seccion: {selected.sectionTag}   Material: {selected.material}", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"Nivel: {selected.lvl}   Fase: {selected.phase}   Largo: {selected.length:F2} m   Orient: {selected.orient}", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"Nodos: {Nodelist(selected)}   Restricciones: {fixStr()}", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.Space(4f);
+
+        DrawSection("CARGAS GRAVITATORIAS");
+        Row2("Area tributaria", $"{selected.tribArea:F2} m2");
+        Row2("w_G (por metro)", $"{selected.wG:F3} kN/m");
+        Row2("w_Q (por metro)", $"{selected.wQ:F3} kN/m");
+        Row2("G = w_G x L", $"{selected.wG * selected.length:F2} kN");
+        Row2("Q = w_Q x L", $"{selected.wQ * selected.length:F2} kN");
+        GUILayout.Space(2f);
+
+        DrawSection($"FUERZAS INTERNAS  [{caso}]");
+        TableHeader();
+        string[] comps = { "N", "Vy", "Vz", "T", "My", "Mz" };
+        for (int r = 0; r < comps.Length; r++) {
+            List<float> v = selected.ForceFor(comps[r], loader != null ? loader.activeCase : null);
+            TableRow(comps[r], DIAG_UNIT[r], v, ROW_COL[r]);
+        }
+        GUILayout.Space(2f);
+
+        DrawSection("DEMANDA / CAPACIDAD (P-M)");
+        float dP = DemandP(selected);
+        float dM = DemandM(selected);
+        Row2("P (compresion +)", $"{dP:F2} kN");
+        Row2("M (flexion)", $"{dM:F2} kN-m");
+        float mcap;
+        float dc = ComputeDC(selected, dP, dM, out mcap);
+        if (!float.IsNaN(dc)) {
+            Row2("M capacidad en P", $"{mcap:F2} kN-m");
+            GUILayout.Space(2f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("D/C = M_dem / M_cap", stBold);
+            bool ok = dc <= 1f;
+            var boxStyle = new GUIStyle(GUI.skin.box);
+            boxStyle.fontSize = 17;
+            boxStyle.fontStyle = FontStyle.Bold;
+            boxStyle.alignment = TextAnchor.MiddleCenter;
+            boxStyle.normal.textColor = Color.white;
+            boxStyle.normal.background = MakeTex(1, 1, ok ? new Color(0.15f, 0.55f, 0.20f, 1f)
+                                                          : new Color(0.75f, 0.15f, 0.15f, 1f));
+            GUILayout.Box($"  {dc:F3}   {(ok ? "OK" : "EXCEDE")}  ", boxStyle, GUILayout.Width(190f));
+            GUILayout.EndHorizontal();
+        } else {
+            Row2("D/C", "N/A (viga: revisar Mz envolvente)");
+        }
+        GUILayout.Space(6f);
+
+        // Graficos: diagramas de fuerzas (izquierda) y curva P-M (derecha).
+        EnsureTextures();
+        GUILayout.BeginHorizontal();
+        if (diagTex != null) {
+            var rd = GUILayoutUtility.GetRect(300f, 260f);
+            GUI.DrawTexture(rd, diagTex, ScaleMode.ScaleToFit);
+        }
+        if (pmTex != null) {
+            var rp = GUILayoutUtility.GetRect(300f, 260f);
+            GUI.DrawTexture(rp, pmTex, ScaleMode.ScaleToFit);
+        }
+        GUILayout.EndHorizontal();
+
+        GUILayout.FlexibleSpace();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Click: seleccionar   L: losas   P: ocultar   C: caso", stLabel);
+        GUILayout.Label("D/M/N: diagramas   F: encuadrar", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.Space(2f);
+    }
+
+    void DrawSlabInfo() {
+        string kind = selectedSlab.isVoladizo ? "VOLADIZO" : "LOSA";
+        GUILayout.Label($"{selectedSlab.building}  ·  {kind}  ·  {selectedSlab.id}", stHeader);
+        GUILayout.Space(2f);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Nivel: " + selectedSlab.lvl, stLabel);
+        GUILayout.Label("Espesor: " + selectedSlab.thickness.ToString("F2") + " m", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.Space(4f);
+
+        DrawSection("CARGAS DE LA LOSA");
+        Row2("Area", selectedSlab.area.ToString("F2") + " m2");
+        Row2("qG (permanente)", selectedSlab.qG.ToString("F3") + " kPa");
+        Row2("qQ (sobrecarga)", selectedSlab.qQ.ToString("F3") + " kPa");
+        Row2("G = qG x A", (selectedSlab.qG * selectedSlab.area).ToString("F1") + " kN");
+        Row2("Q = qQ x A", (selectedSlab.qQ * selectedSlab.area).ToString("F1") + " kN");
+        GUILayout.Space(4f);
+        var wrap = new GUIStyle(stLabel);
+        wrap.wordWrap = true;
+        GUILayout.Box("La losa contribuye a los pesos sismicos W y transmite sus cargas " +
+                      "a vigas y columnas. No aplica curva P-M ni fuerzas internas.", wrap,
+                      GUILayout.ExpandWidth(true));
+        GUILayout.FlexibleSpace();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Click: seleccionar   L: losas   P: ocultar", stLabel);
+        GUILayout.EndHorizontal();
+        GUILayout.Space(2f);
+    }
+
+    string case_display(string c) {
+        for (int i = 0; i < CASE_IDS.Length; i++)
+            if (CASE_IDS[i] == c) return CASE_LBL[i];
+        return c;
+    }
+
+    void DrawCaseSelector() {
+        string active = loader != null && loader.activeCase != null ? loader.activeCase : "COMBO";
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Caso:", stBold, GUILayout.Width(66f));
+        for (int i = 0; i < CASE_IDS.Length; i++) {
+            bool on = CASE_IDS[i].Equals(active);
+            bool pressed = GUILayout.Toggle(on, CASE_LBL[i], GUI.skin.button,
+                                           GUILayout.Width(104f));
+            if (pressed != on) {
+                loader.activeCase = CASE_IDS[i] == "COMBO" ? null : CASE_IDS[i];
+                InvalidateTextures();
+                if (selected != null) {
+                    RebuildTextures(selected);
+                }
             }
         }
+        GUILayout.EndHorizontal();
+        GUILayout.Space(3f);
+    }
+
+    void DrawSection(string title) {
+        GUILayout.BeginHorizontal();
+        GUILayout.Space(2f);
+        GUILayout.Label(title, stSection);
+        var line = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandWidth(true));
+        GUI.Box(line, GUIContent.none);
+        GUILayout.EndHorizontal();
+    }
+
+    void TableHeader() {
+        GUILayout.BeginHorizontal();
+        string[] h = { "Fuerza", "i", "j", "Max|.|", "Unidad" };
+        float[] w = { 96f, 86f, 86f, 92f, 92f };
+        GUILayout.Label(h[0], stBold, GUILayout.Width(w[0]));
+        for (int c = 1; c < h.Length; c++)
+            GUILayout.Label(h[c], stBold, GUILayout.Width(w[c]));
+        GUILayout.EndHorizontal();
+    }
+
+    void TableRow(string name, string unit, List<float> v, Color col) {
+        GUILayout.BeginHorizontal();
+        var lname = new GUIStyle(stLabel);
+        lname.normal.textColor = col;
+        lname.fontStyle = FontStyle.Bold;
+        GUILayout.Label(name, lname, GUILayout.Width(96f));
+        if (v == null || v.Count < 2) {
+            GUILayout.Label("-", stLabel, GUILayout.Width(86f));
+            GUILayout.Label("-", stLabel, GUILayout.Width(86f));
+            GUILayout.Label("-", stLabel, GUILayout.Width(92f));
+        } else {
+            float vi = v[0], vj = v[1];
+            float mx = Mathf.Max(Mathf.Abs(vi), Mathf.Abs(vj));
+            GUILayout.Label(vi.ToString("F2"), stValue, GUILayout.Width(86f));
+            GUILayout.Label(vj.ToString("F2"), stValue, GUILayout.Width(86f));
+            GUILayout.Label(mx.ToString("F2"), stValue, GUILayout.Width(92f));
+        }
+        GUILayout.Label(unit, stLabel, GUILayout.Width(92f));
+        GUILayout.EndHorizontal();
+    }
+
+    void Row2(string name, string value) {
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(name, stLabel, GUILayout.Width(190f));
+        GUILayout.Label(value, stBold, GUILayout.Width(260f));
+        GUILayout.EndHorizontal();
+    }
+
+    string fixStr() {
+        if (loader == null || selected == null || selected.nodeIds == null) return "-";
+        var sb = new StringBuilder();
+        for (int k = 0; k < selected.nodeIds.Count && k < 2; k++) {
+            if (loader.nodeById.TryGetValue(selected.nodeIds[k], out var n))
+                sb.Append((k == 0 ? "i:{" : " j:{") + ListInt(n.fix) + "}");
+        }
+        return sb.ToString().Length == 0 ? "-" : sb.ToString();
     }
 
     void SelectElement(ElementMono el) {
@@ -140,49 +344,44 @@ public class UIInspector : MonoBehaviour {
         if (selected == el) { ClearSelection(); return; }
         ClearHighlight();
         selected = el;
+        selectedSlab = null;
         Highlight(el, true);
-        ShowInfo(el);
-        DrawPmPlot(el);
-        DrawDiagrams(el);
+        RebuildTextures(el);
     }
 
     void SelectSlab(SlabMono sm) {
-        if (sm == null) { ClearSelection(); return; }
         ClearHighlight();
         selected = null;
-        if (pmPlotCanvas != null) pmPlotCanvas.texture = null;
-        if (diagramCanvas != null) diagramCanvas.texture = null;
-        if (txtElementInfo != null) {
-            string kind = sm.isVoladizo ? "VOLADIZO" : "LOSA";
-            var sb = new StringBuilder();
-            sb.AppendLine($"== {sm.building}  {kind}  ·  {sm.id} ==");
-            sb.AppendLine($"Nivel    : {sm.lvl}");
-            sb.AppendLine($"Espesor  : {sm.thickness:F2} m");
-            sb.AppendLine($"Area     : {sm.area,12:F2} m2");
-            sb.AppendLine($"qG       : {sm.qG,12:F3} kPa");
-            sb.AppendLine($"qQ       : {sm.qQ,12:F3} kPa");
-            sb.AppendLine($"G = qG·A : {sm.qG * sm.area,12:F1} kN");
-            sb.AppendLine($"Q = qQ·A : {sm.qQ * sm.area,12:F1} kN");
-            sb.AppendLine(line32());
-            sb.AppendLine("(La losa aporta a los pesos sismicos W=C·Sigma(P);");
-            sb.AppendLine("sus fuerzas se transmiten a vigas/columnas. Grafico");
-            sb.AppendLine("P-M y fuerzas no aplican a la losa.)");
-            sb.AppendLine("Clic: seleccionar  L: dejar de seleccionar losas  P: panel");
-            txtElementInfo.text = sb.ToString();
-        }
-    }
-
-    static string line32() {
-        return "--------------------------------";
+        selectedSlab = sm;
+        pmTex = null;
+        diagTex = null;
     }
 
     void ClearSelection() {
         ClearHighlight();
         selected = null;
-        if (txtElementInfo != null)
-            txtElementInfo.text = "Haz clic en un elemento de la estructura...";
-        if (pmPlotCanvas != null) pmPlotCanvas.texture = null;
-        if (diagramCanvas != null) diagramCanvas.texture = null;
+        selectedSlab = null;
+        pmTex = null;
+        diagTex = null;
+    }
+
+    void InvalidateTextures() {
+        if (pmTex != null) { Destroy(pmTex); pmTex = null; }
+        if (diagTex != null) { Destroy(diagTex); diagTex = null; }
+    }
+
+    void RebuildTextures(ElementMono el) {
+        var np = BuildPmTexture(el);
+        var nd = BuildDiagrams(el);
+        if (pmTex != null) Destroy(pmTex);
+        if (diagTex != null) Destroy(diagTex);
+        pmTex = np;
+        diagTex = nd;
+    }
+
+    void EnsureTextures() {
+        if ((pmTex == null || diagTex == null) && selected != null)
+            RebuildTextures(selected);
     }
 
     void ClearHighlight() {
@@ -209,67 +408,6 @@ public class UIInspector : MonoBehaviour {
         }
     }
 
-    void ShowInfo(ElementMono el) {
-        if (txtElementInfo == null) return;
-        string tipo = el.elementType == "column" ? "COLUMNA"
-                    : el.elementType == "wall"   ? "MURO" : "VIGA";
-        string fixStr = "";
-        if (loader != null && el.nodeIds != null && el.nodeIds.Count >= 2) {
-            if (loader.nodeById.TryGetValue(el.nodeIds[0], out var n1)) fixStr += "i:{" + ListInt(n1.fix) + "}";
-            if (loader.nodeById.TryGetValue(el.nodeIds[1], out var n2)) fixStr += "  j:{" + ListInt(n2.fix) + "}";
-        }
-
-        string comb = (loader != null && loader.data != null) ? loader.data.combinacion : "---";
-        string casoLbl = (loader != null && loader.activeCase != null)
-            ? $"Caso {loader.activeCase}"
-            : $"Combinacion {comb}";
-        const string line = "----------------------------------------------------------------";
-
-        var sb = new StringBuilder();
-        sb.AppendLine($"== {el.building}  {tipo}  ·  TAG {el.elementTag}  [{casoLbl}] ==");
-        sb.AppendLine($"CAD    : {el.cadID}");
-        sb.AppendLine($"Seccion: {el.sectionTag}   Material: {el.material}");
-        sb.AppendLine($"Nivel  : {el.lvl}   Fase: {el.phase}   Largo: {el.length:F2} m   Orient: {el.orient}");
-        sb.AppendLine($"Nodos  : {Nodelist(el)}   Restricciones: {fixStr}");
-        sb.AppendLine(line);
-
-        sb.AppendLine("CARGAS GRAVITATORIAS");
-        sb.AppendLine($"  Area tributaria      : {el.tribArea,12:F3} m2");
-        sb.AppendLine($"  w_G (por metro)      : {el.wG,12:F3} kN/m");
-        sb.AppendLine($"  w_Q (por metro)      : {el.wQ,12:F3} kN/m");
-        sb.AppendLine($"  G = w_G x L          : {el.wG * el.length,12:F2} kN");
-        sb.AppendLine($"  Q = w_Q x L          : {el.wQ * el.length,12:F2} kN");
-        sb.AppendLine(line);
-
-        sb.AppendLine($"FUERZAS INTERNAS   [{casoLbl}]");
-        sb.AppendLine("  Fuerza          i            j        Max|.|    Unidad");
-        AppendForce(sb, "N",  el.ForceFor("N",  loader != null ? loader.activeCase : null), "kN");
-        AppendForce(sb, "Vy", el.ForceFor("Vy", loader != null ? loader.activeCase : null), "kN");
-        AppendForce(sb, "Vz", el.ForceFor("Vz", loader != null ? loader.activeCase : null), "kN");
-        AppendForce(sb, "T",  el.ForceFor("T",  loader != null ? loader.activeCase : null), "kN-m");
-        AppendForce(sb, "My", el.ForceFor("My", loader != null ? loader.activeCase : null), "kN-m");
-        AppendForce(sb, "Mz", el.ForceFor("Mz", loader != null ? loader.activeCase : null), "kN-m");
-        sb.AppendLine(line);
-
-        sb.AppendLine("DEMANDA / CAPACIDAD (P-M)");
-        float dP = DemandP(el);
-        float dM = DemandM(el);
-        sb.AppendLine($"  P (compresion +)     : {dP,12:F2} kN");
-        sb.AppendLine($"  M (flexion)          : {dM,12:F2} kN-m");
-        float mcap;
-        float dc = ComputeDC(el, dP, dM, out mcap);
-        if (!float.IsNaN(dc)) {
-            sb.AppendLine($"  M capacidad en P     : {mcap,12:F2} kN-m");
-            sb.AppendLine($"  D/C = M_dem / M_cap  : {dc,12:F3}   {(dc <= 1f ? "OK" : "*** EXCEDE ***")}");
-        } else {
-            sb.AppendLine("  (sin curva P-M: seccion de viga -> revisar Mz envolvente)");
-        }
-        sb.AppendLine(line);
-        sb.AppendLine("Clic: seleccionar  Der: rotar  Rueda: zoom  F: encuadrar");
-        sb.AppendLine("D/M/N: diagramas  C: cambiar caso  P: ocultar panel");
-        txtElementInfo.text = sb.ToString();
-    }
-
     float DemandP(ElementMono el) {
         var v = el.ForceFor("P", loader != null ? loader.activeCase : null);
         if (v != null && v.Count >= 1) return v[0];
@@ -280,13 +418,6 @@ public class UIInspector : MonoBehaviour {
         var v = el.ForceFor("M", loader != null ? loader.activeCase : null);
         if (v != null && v.Count >= 1) return v[0];
         return el.demandM;
-    }
-
-    static void AppendForce(StringBuilder sb, string name, List<float> v, string unit) {
-        if (v == null || v.Count < 2) return;
-        float vi = v[0], vj = v[1];
-        float mx = Mathf.Max(Mathf.Abs(vi), Mathf.Abs(vj));
-        sb.AppendLine($"  {name,-7} {vi,12:F2} {vj,12:F2} {mx,12:F2}    {unit}");
     }
 
     static string Nodelist(ElementMono el) {
@@ -327,56 +458,45 @@ public class UIInspector : MonoBehaviour {
                 return Mathf.Lerp(M[i], M[i + 1], t);
             }
         }
-        // fuera de rango: usar el extremo mas cercano
         if (p < Mathf.Min(P[0], P[P.Count - 1])) return M[P[0] < P[P.Count - 1] ? 0 : P.Count - 1];
         return M[P[0] > P[P.Count - 1] ? 0 : P.Count - 1];
     }
 
-    void DrawPmPlot(ElementMono el) {
-        if (pmPlotCanvas == null) return;
-        int size = 320;
-        float dP = DemandP(el);
-        float dM = DemandM(el);
+    /// <summary>Curva P-M (capacidad) con el punto de demanda del caso activo.</summary>
+    Texture2D BuildPmTexture(ElementMono el) {
+        int size = 300;
         var tex = new Texture2D(size, size);
-        Color bg = new Color(0.95f, 0.95f, 0.98f, 1f);
-        Color axCol = new Color(0.3f, 0.3f, 0.3f, 1f);
+        Color bg = new Color(0.97f, 0.98f, 1f, 1f);
+        Color axCol = new Color(0.35f, 0.35f, 0.4f, 1f);
         Color capCol = new Color(0.1f, 0.35f, 0.6f, 1f);
-        Color demCol = new Color(0.8f, 0.15f, 0.15f, 1f);
-
+        Color demCol = new Color(0.8f, 0.18f, 0.18f, 1f);
         for (int px = 0; px < size; px++)
             for (int py = 0; py < size; py++)
                 tex.SetPixel(px, py, bg);
 
-        // axes
         int originX = size / 2;
-        int originY = 20;
+        int originY = 18;
         for (int i = 0; i < size; i++) {
             tex.SetPixel(originX, i, axCol);
             tex.SetPixel(i, originY, axCol);
         }
 
+        float dP = DemandP(el);
+        float dM = DemandM(el);
+
         if (loader != null && loader.data != null && loader.data.pm_capacity != null
             && (el.elementType == "column" || el.elementType == "wall")) {
-
             string sec = el.elementType == "column" ? "PILAR-70x70" : "M-20";
             PMCapacityEntry capEntry = null;
             foreach (var entry in loader.data.pm_capacity) {
-                if (entry.section == sec || entry.section == el.sectionTag) {
-                    capEntry = entry;
-                    break;
-                }
+                if (entry.section == sec || entry.section == el.sectionTag) { capEntry = entry; break; }
             }
             if (capEntry == null) {
                 foreach (var entry in loader.data.pm_capacity) {
-                    if (entry.section == "PILAR-70x70" && el.elementType == "column") {
-                        capEntry = entry; break;
-                    }
-                    if (entry.section == "M-20" && el.elementType == "wall") {
-                        capEntry = entry; break;
-                    }
+                    if (entry.section == "PILAR-70x70" && el.elementType == "column") { capEntry = entry; break; }
+                    if (entry.section == "M-20" && el.elementType == "wall") { capEntry = entry; break; }
                 }
             }
-
             if (capEntry != null) {
                 float pMax = 0, pMin = 0, mMax = 0;
                 foreach (float pv in capEntry.P) { if (pv > pMax) pMax = pv; if (pv < pMin) pMin = pv; }
@@ -384,9 +504,8 @@ public class UIInspector : MonoBehaviour {
                 if (mMax < 1f) mMax = 1f;
                 float pRange = pMax - pMin;
                 if (pRange < 1f) pRange = 1f;
-                float mScale = (size - 40f) / (2f * mMax);
-                float pScale = (size - 40f) / pRange;
-
+                float mScale = (size - 36f) / (2f * mMax);
+                float pScale = (size - 36f) / pRange;
                 for (int i = 0; i < capEntry.P.Count - 1; i++) {
                     int x1 = (int)(originX + capEntry.M[i] * mScale);
                     int y1 = (int)(originY + (capEntry.P[i] - pMin) * pScale);
@@ -394,34 +513,29 @@ public class UIInspector : MonoBehaviour {
                     int y2 = (int)(originY + (capEntry.P[i + 1] - pMin) * pScale);
                     DrawLine(tex, x1, y1, x2, y2, capCol, 2);
                 }
-
                 int dx = (int)(originX + dM * mScale);
                 int dy = (int)(originY + (dP - pMin) * pScale);
-                for (int ox = -3; ox <= 3; ox++)
-                    for (int oy = -3; oy <= 3; oy++) {
+                for (int ox = -4; ox <= 4; ox++)
+                    for (int oy = -4; oy <= 4; oy++) {
                         int px = dx + ox, py = dy + oy;
                         if (px >= 0 && px < size && py >= 0 && py < size)
                             tex.SetPixel(px, py, demCol);
                     }
             }
         }
-
         tex.Apply();
-        pmPlotCanvas.texture = tex;
+        return tex;
     }
 
-    /// <summary>Dibuja 6 minigraficos de fuerzas internas (N,Vy,Vz,T,My,Mz) del
-    /// elemento seleccionado para el caso activo: valor en i y j con variacion
-    /// lineal a lo largo del elemento, y linea de cero.</summary>
-    void DrawDiagrams(ElementMono el) {
-        if (diagramCanvas == null) return;
-        int size = 320;
-        float rowH = 44f;
-        float topM = 16f;
-        float xL = 52f, xR = 308f;
+    /// <summary>Diagramas de fuerzas internas (N,Vy,Vz,T,My,Mz) con valores i/j.</summary>
+    Texture2D BuildDiagrams(ElementMono el) {
+        int size = 300;
+        float rowH = 40f;
+        float topM = 14f;
+        float xL = 52f, xR = 292f;
         var tex = new Texture2D(size, size);
         Color bg = new Color(0.97f, 0.97f, 1f, 1f);
-        Color zero = new Color(0.4f, 0.4f, 0.45f, 1f);
+        Color zero = new Color(0.42f, 0.42f, 0.48f, 1f);
         for (int px = 0; px < size; px++)
             for (int py = 0; py < size; py++)
                 tex.SetPixel(px, py, bg);
@@ -441,56 +555,23 @@ public class UIInspector : MonoBehaviour {
 
             int pxPrev = (int)xL;
             int pyPrev = (int)(yMid + vi * s);
-            tex.SetPixel(pxPrev, pyPrev, DIAG_COL[r]);
             for (int t = 1; t <= 40; t++) {
                 float ft = (float)t / 40f;
                 float xCur = Mathf.Lerp(xL, xR, ft);
                 float yCur = yMid + (vi + (vj - vi) * ft) * s;
-                DrawLine(tex, pxPrev, pyPrev, (int)xCur, (int)yCur, DIAG_COL[r], 2);
+                DrawLine(tex, pxPrev, pyPrev, (int)xCur, (int)yCur, ROW_COL[r], 2);
                 pxPrev = (int)xCur;
                 pyPrev = (int)yCur;
             }
             int xi = (int)xL, xj = (int)xR;
             for (int ox = -2; ox <= 2; ox++)
                 for (int oy = -2; oy <= 2; oy++) {
-                    tex.SetPixel(xi + ox, (int)(yMid + vi * s) + oy, DIAG_COL[r]);
-                    tex.SetPixel(xj + ox, (int)(yMid + vj * s) + oy, DIAG_COL[r]);
+                    tex.SetPixel(xi + ox, (int)(yMid + vi * s) + oy, ROW_COL[r]);
+                    tex.SetPixel(xj + ox, (int)(yMid + vj * s) + oy, ROW_COL[r]);
                 }
         }
-
         tex.Apply();
-        diagramCanvas.texture = tex;
-    }
-
-    /// <summary>Etiquetas de las filas del canvas de diagramas (coinciden en
-    /// pantalla con las posiciones dibujadas en DrawDiagrams).</summary>
-    void OnGUI() {
-        if (diagramCanvas == null || !diagramCanvas.gameObject.activeInHierarchy) return;
-        if (selected == null) return;
-        float W = Screen.width, H = Screen.height;
-        float rowH = 44f, topM = 16f;
-        float left = W - 516f;
-        float topY = H - 320f + topM;
-        string caso = (loader != null && loader.activeCase != null)
-            ? loader.activeCase : (loader != null && loader.data != null ? loader.data.combinacion : "");
-        GUI.contentColor = new Color(0.1f, 0.1f, 0.2f, 1f);
-        GUI.Label(new Rect(left, topY - 22f, 300f, 20f), $"Fuerzas i/j  [{caso}]");
-        for (int r = 0; r < DIAG_COMPS.Length; r++) {
-            GUI.color = DIAG_COL[r];
-            GUI.Label(new Rect(left + 2f, topY + r * rowH + 8f, 46f, 24f), DIAG_COMPS[r]);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(left + 48f, topY + r * rowH + 8f, 40f, 24f), DIAG_UNIT[r]);
-            float yi = -180f, yj = 180f;
-            List<float> v = selected.ForceFor(DIAG_COMPS[r], loader != null ? loader.activeCase : null);
-            if (v != null && v.Count >= 2) { yi = v[0]; yj = v[1]; }
-            GUI.color = new Color(0.15f, 0.15f, 0.25f, 1f);
-            GUI.Label(new Rect(left + 122f, topY + r * rowH + 8f, 96f, 24f),
-                      $"i:{yi,8:F2}");
-            GUI.Label(new Rect(left + 216f, topY + r * rowH + 8f, 120f, 24f),
-                      $"  j:{yj,8:F2}");
-        }
-        GUI.color = Color.white;
-        GUI.contentColor = Color.white;
+        return tex;
     }
 
     static void DrawLine(Texture2D tex, int x0, int y0, int x1, int y1, Color col, int thick) {
@@ -512,8 +593,7 @@ public class UIInspector : MonoBehaviour {
         }
     }
 
-    static string F3(Vector3 v) => $"{v.x:F3}, {v.y:F3}, {v.z:F3}";
-    static string ListInt(System.Collections.Generic.List<int> l) {
+    static string ListInt(List<int> l) {
         if (l == null) return "?";
         string s = "";
         for (int i = 0; i < l.Count; i++) { if (i > 0) s += ","; s += l[i]; }

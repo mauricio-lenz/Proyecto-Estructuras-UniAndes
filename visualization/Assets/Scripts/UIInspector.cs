@@ -8,9 +8,22 @@ public class UIInspector : MonoBehaviour {
     public RawImage pmPlotCanvas;
     public StructuralLoader loader;
 
+    private RawImage diagramCanvas;
+    private bool slabSelection = false;
     private ElementMono selected;
     private Material lastHighMat;
     private bool panelVisible = true;
+
+    static readonly string[] DIAG_COMPS = { "N", "Vy", "Vz", "T", "My", "Mz" };
+    static readonly string[] DIAG_UNIT  = { "kN", "kN", "kN", "kN-m", "kN-m", "kN-m" };
+    static readonly Color[] DIAG_COL = {
+        new Color(0.15f, 0.35f, 0.85f, 1f),
+        new Color(0.10f, 0.60f, 0.25f, 1f),
+        new Color(0.90f, 0.55f, 0.10f, 1f),
+        new Color(0.65f, 0.25f, 0.75f, 1f),
+        new Color(0.55f, 0.35f, 0.15f, 1f),
+        new Color(0.85f, 0.15f, 0.15f, 1f),
+    };
 
     void Awake() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
@@ -45,7 +58,33 @@ public class UIInspector : MonoBehaviour {
         EnsureBackground(rt);
         if (pmPlotCanvas != null) {
             pmPlotCanvas.rectTransform.sizeDelta = new Vector2(320f, 320f);
+            SetupDiagramCanvas();
         }
+    }
+
+    /// <summary>Crea el canvas de diagramas de fuerzas internas, a la izquierda
+    /// del grafico P-M (esquina inferior derecha).</summary>
+    void SetupDiagramCanvas() {
+        if (pmPlotCanvas == null || pmPlotCanvas.transform.parent == null) return;
+        var parent = pmPlotCanvas.transform.parent;
+        Transform existing = null;
+        for (int i = 0; i < parent.childCount; i++)
+            if (parent.GetChild(i).name == "Diagramas") { existing = parent.GetChild(i); break; }
+        if (existing != null)
+            diagramCanvas = existing.GetComponent<RawImage>();
+        else {
+            var go = new GameObject("Diagramas", typeof(RectTransform),
+                                    typeof(CanvasRenderer), typeof(RawImage));
+            go.transform.SetParent(parent, false);
+            diagramCanvas = go.GetComponent<RawImage>();
+        }
+        var rt = diagramCanvas.rectTransform;
+        rt.anchorMin = new Vector2(1f, 0f);
+        rt.anchorMax = new Vector2(1f, 0f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(-356f, 160f);
+        rt.sizeDelta = new Vector2(320f, 320f);
+        diagramCanvas.raycastTarget = false;
     }
 
     /// <summary>Crea (o reusa) un Image blanco semitransparente detrás del texto.</summary>
@@ -77,13 +116,21 @@ public class UIInspector : MonoBehaviour {
             panelVisible = !panelVisible;
             if (txtElementInfo != null) txtElementInfo.gameObject.SetActive(panelVisible);
             if (pmPlotCanvas != null) pmPlotCanvas.gameObject.SetActive(panelVisible);
+            if (diagramCanvas != null) diagramCanvas.gameObject.SetActive(panelVisible);
+        }
+        if (Input.GetKeyDown(KeyCode.L)) {
+            slabSelection = !slabSelection;
+            if (loader != null) loader.SetSlabSelection(slabSelection);
         }
         if (Input.GetMouseButtonDown(0) && loader != null) {
             Ray ray = Camera.main != null
                 ? Camera.main.ScreenPointToRay(Input.mousePosition) : new Ray();
             if (Physics.Raycast(ray, out RaycastHit hit)) {
                 var el = hit.collider.GetComponentInParent<ElementMono>();
-                SelectElement(el);
+                if (el != null) { SelectElement(el); return; }
+                var sm = hit.collider.GetComponentInParent<SlabMono>();
+                if (sm != null) { SelectSlab(sm); return; }
+                ClearSelection();
             }
         }
     }
@@ -96,6 +143,37 @@ public class UIInspector : MonoBehaviour {
         Highlight(el, true);
         ShowInfo(el);
         DrawPmPlot(el);
+        DrawDiagrams(el);
+    }
+
+    void SelectSlab(SlabMono sm) {
+        if (sm == null) { ClearSelection(); return; }
+        ClearHighlight();
+        selected = null;
+        if (pmPlotCanvas != null) pmPlotCanvas.texture = null;
+        if (diagramCanvas != null) diagramCanvas.texture = null;
+        if (txtElementInfo != null) {
+            string kind = sm.isVoladizo ? "VOLADIZO" : "LOSA";
+            var sb = new StringBuilder();
+            sb.AppendLine($"== {sm.building}  {kind}  ·  {sm.id} ==");
+            sb.AppendLine($"Nivel    : {sm.lvl}");
+            sb.AppendLine($"Espesor  : {sm.thickness:F2} m");
+            sb.AppendLine($"Area     : {sm.area,12:F2} m2");
+            sb.AppendLine($"qG       : {sm.qG,12:F3} kPa");
+            sb.AppendLine($"qQ       : {sm.qQ,12:F3} kPa");
+            sb.AppendLine($"G = qG·A : {sm.qG * sm.area,12:F1} kN");
+            sb.AppendLine($"Q = qQ·A : {sm.qQ * sm.area,12:F1} kN");
+            sb.AppendLine(line32());
+            sb.AppendLine("(La losa aporta a los pesos sismicos W=C·Sigma(P);");
+            sb.AppendLine("sus fuerzas se transmiten a vigas/columnas. Grafico");
+            sb.AppendLine("P-M y fuerzas no aplican a la losa.)");
+            sb.AppendLine("Clic: seleccionar  L: dejar de seleccionar losas  P: panel");
+            txtElementInfo.text = sb.ToString();
+        }
+    }
+
+    static string line32() {
+        return "--------------------------------";
     }
 
     void ClearSelection() {
@@ -104,6 +182,7 @@ public class UIInspector : MonoBehaviour {
         if (txtElementInfo != null)
             txtElementInfo.text = "Haz clic en un elemento de la estructura...";
         if (pmPlotCanvas != null) pmPlotCanvas.texture = null;
+        if (diagramCanvas != null) diagramCanvas.texture = null;
     }
 
     void ClearHighlight() {
@@ -141,10 +220,13 @@ public class UIInspector : MonoBehaviour {
         }
 
         string comb = (loader != null && loader.data != null) ? loader.data.combinacion : "---";
+        string casoLbl = (loader != null && loader.activeCase != null)
+            ? $"Caso {loader.activeCase}"
+            : $"Combinacion {comb}";
         const string line = "----------------------------------------------------------------";
 
         var sb = new StringBuilder();
-        sb.AppendLine($"== {el.building}  {tipo}  ·  TAG {el.elementTag} ==");
+        sb.AppendLine($"== {el.building}  {tipo}  ·  TAG {el.elementTag}  [{casoLbl}] ==");
         sb.AppendLine($"CAD    : {el.cadID}");
         sb.AppendLine($"Seccion: {el.sectionTag}   Material: {el.material}");
         sb.AppendLine($"Nivel  : {el.lvl}   Fase: {el.phase}   Largo: {el.length:F2} m   Orient: {el.orient}");
@@ -159,21 +241,23 @@ public class UIInspector : MonoBehaviour {
         sb.AppendLine($"  Q = w_Q x L          : {el.wQ * el.length,12:F2} kN");
         sb.AppendLine(line);
 
-        sb.AppendLine($"FUERZAS INTERNAS   [{comb}]");
+        sb.AppendLine($"FUERZAS INTERNAS   [{casoLbl}]");
         sb.AppendLine("  Fuerza          i            j        Max|.|    Unidad");
-        AppendForce(sb, "N",    el.N,  "kN");
-        AppendForce(sb, "Vy",   el.Vy, "kN");
-        AppendForce(sb, "Vz",   el.Vz, "kN");
-        AppendForce(sb, "T",    el.T,  "kN-m");
-        AppendForce(sb, "My",   el.My, "kN-m");
-        AppendForce(sb, "Mz",   el.Mz, "kN-m");
+        AppendForce(sb, "N",  el.ForceFor("N",  loader != null ? loader.activeCase : null), "kN");
+        AppendForce(sb, "Vy", el.ForceFor("Vy", loader != null ? loader.activeCase : null), "kN");
+        AppendForce(sb, "Vz", el.ForceFor("Vz", loader != null ? loader.activeCase : null), "kN");
+        AppendForce(sb, "T",  el.ForceFor("T",  loader != null ? loader.activeCase : null), "kN-m");
+        AppendForce(sb, "My", el.ForceFor("My", loader != null ? loader.activeCase : null), "kN-m");
+        AppendForce(sb, "Mz", el.ForceFor("Mz", loader != null ? loader.activeCase : null), "kN-m");
         sb.AppendLine(line);
 
         sb.AppendLine("DEMANDA / CAPACIDAD (P-M)");
-        sb.AppendLine($"  P (compresion +)     : {el.demandP,12:F2} kN");
-        sb.AppendLine($"  M (flexion)          : {el.demandM,12:F2} kN-m");
+        float dP = DemandP(el);
+        float dM = DemandM(el);
+        sb.AppendLine($"  P (compresion +)     : {dP,12:F2} kN");
+        sb.AppendLine($"  M (flexion)          : {dM,12:F2} kN-m");
         float mcap;
-        float dc = ComputeDC(el, out mcap);
+        float dc = ComputeDC(el, dP, dM, out mcap);
         if (!float.IsNaN(dc)) {
             sb.AppendLine($"  M capacidad en P     : {mcap,12:F2} kN-m");
             sb.AppendLine($"  D/C = M_dem / M_cap  : {dc,12:F3}   {(dc <= 1f ? "OK" : "*** EXCEDE ***")}");
@@ -181,8 +265,21 @@ public class UIInspector : MonoBehaviour {
             sb.AppendLine("  (sin curva P-M: seccion de viga -> revisar Mz envolvente)");
         }
         sb.AppendLine(line);
-        sb.AppendLine("Clic derecho: rotar   Rueda: zoom   F: reencuadrar   P: ocultar panel");
+        sb.AppendLine("Clic: seleccionar  Der: rotar  Rueda: zoom  F: encuadrar");
+        sb.AppendLine("D/M/N: diagramas  C: cambiar caso  P: ocultar panel");
         txtElementInfo.text = sb.ToString();
+    }
+
+    float DemandP(ElementMono el) {
+        var v = el.ForceFor("P", loader != null ? loader.activeCase : null);
+        if (v != null && v.Count >= 1) return v[0];
+        return el.demandP;
+    }
+
+    float DemandM(ElementMono el) {
+        var v = el.ForceFor("M", loader != null ? loader.activeCase : null);
+        if (v != null && v.Count >= 1) return v[0];
+        return el.demandM;
     }
 
     static void AppendForce(StringBuilder sb, string name, List<float> v, string unit) {
@@ -197,8 +294,8 @@ public class UIInspector : MonoBehaviour {
         return $"{el.nodeIds[0]} -> {el.nodeIds[1]}";
     }
 
-    /// <summary>D/C = M_demanda / M_capacidad interpolada en P=demandP. NaN si no aplica.</summary>
-    float ComputeDC(ElementMono el, out float mcap) {
+    /// <summary>D/C = M_demanda / M_capacidad interpolada en P. NaN si no aplica.</summary>
+    float ComputeDC(ElementMono el, float dP, float dM, out float mcap) {
         mcap = float.NaN;
         if (loader == null || loader.data == null || loader.data.pm_capacity == null) return float.NaN;
         if (el.elementType != "column" && el.elementType != "wall") return float.NaN;
@@ -213,10 +310,10 @@ public class UIInspector : MonoBehaviour {
             }
         }
         if (cap == null || cap.P == null || cap.M == null || cap.P.Count < 2) return float.NaN;
-        float mc = InterpCapacityM(cap, el.demandP);
+        float mc = InterpCapacityM(cap, dP);
         if (mc <= 1e-6f) return float.NaN;
         mcap = mc;
-        return Mathf.Abs(el.demandM) / mc;
+        return Mathf.Abs(dM) / mc;
     }
 
     static float InterpCapacityM(PMCapacityEntry cap, float p) {
@@ -238,6 +335,8 @@ public class UIInspector : MonoBehaviour {
     void DrawPmPlot(ElementMono el) {
         if (pmPlotCanvas == null) return;
         int size = 320;
+        float dP = DemandP(el);
+        float dM = DemandM(el);
         var tex = new Texture2D(size, size);
         Color bg = new Color(0.95f, 0.95f, 0.98f, 1f);
         Color axCol = new Color(0.3f, 0.3f, 0.3f, 1f);
@@ -296,8 +395,8 @@ public class UIInspector : MonoBehaviour {
                     DrawLine(tex, x1, y1, x2, y2, capCol, 2);
                 }
 
-                int dx = (int)(originX + el.demandM * mScale);
-                int dy = (int)(originY + (el.demandP - pMin) * pScale);
+                int dx = (int)(originX + dM * mScale);
+                int dy = (int)(originY + (dP - pMin) * pScale);
                 for (int ox = -3; ox <= 3; ox++)
                     for (int oy = -3; oy <= 3; oy++) {
                         int px = dx + ox, py = dy + oy;
@@ -309,6 +408,89 @@ public class UIInspector : MonoBehaviour {
 
         tex.Apply();
         pmPlotCanvas.texture = tex;
+    }
+
+    /// <summary>Dibuja 6 minigraficos de fuerzas internas (N,Vy,Vz,T,My,Mz) del
+    /// elemento seleccionado para el caso activo: valor en i y j con variacion
+    /// lineal a lo largo del elemento, y linea de cero.</summary>
+    void DrawDiagrams(ElementMono el) {
+        if (diagramCanvas == null) return;
+        int size = 320;
+        float rowH = 44f;
+        float topM = 16f;
+        float xL = 52f, xR = 308f;
+        var tex = new Texture2D(size, size);
+        Color bg = new Color(0.97f, 0.97f, 1f, 1f);
+        Color zero = new Color(0.4f, 0.4f, 0.45f, 1f);
+        for (int px = 0; px < size; px++)
+            for (int py = 0; py < size; py++)
+                tex.SetPixel(px, py, bg);
+
+        for (int r = 0; r < DIAG_COMPS.Length; r++) {
+            float yTop = size - topM - r * rowH;
+            float yBot = yTop - rowH;
+            float yMid = (yTop + yBot) / 2f;
+
+            DrawLine(tex, (int)xL, (int)yMid, (int)xR, (int)yMid, zero, 1);
+
+            List<float> v = el.ForceFor(DIAG_COMPS[r], loader != null ? loader.activeCase : null);
+            if (v == null || v.Count < 2) continue;
+            float vi = v[0], vj = v[1];
+            float maxAbs = Mathf.Max(Mathf.Abs(vi), Mathf.Abs(vj), 1e-3f);
+            float s = (rowH * 0.36f) / maxAbs;
+
+            int pxPrev = (int)xL;
+            int pyPrev = (int)(yMid + vi * s);
+            tex.SetPixel(pxPrev, pyPrev, DIAG_COL[r]);
+            for (int t = 1; t <= 40; t++) {
+                float ft = (float)t / 40f;
+                float xCur = Mathf.Lerp(xL, xR, ft);
+                float yCur = yMid + (vi + (vj - vi) * ft) * s;
+                DrawLine(tex, pxPrev, pyPrev, (int)xCur, (int)yCur, DIAG_COL[r], 2);
+                pxPrev = (int)xCur;
+                pyPrev = (int)yCur;
+            }
+            int xi = (int)xL, xj = (int)xR;
+            for (int ox = -2; ox <= 2; ox++)
+                for (int oy = -2; oy <= 2; oy++) {
+                    tex.SetPixel(xi + ox, (int)(yMid + vi * s) + oy, DIAG_COL[r]);
+                    tex.SetPixel(xj + ox, (int)(yMid + vj * s) + oy, DIAG_COL[r]);
+                }
+        }
+
+        tex.Apply();
+        diagramCanvas.texture = tex;
+    }
+
+    /// <summary>Etiquetas de las filas del canvas de diagramas (coinciden en
+    /// pantalla con las posiciones dibujadas en DrawDiagrams).</summary>
+    void OnGUI() {
+        if (diagramCanvas == null || !diagramCanvas.gameObject.activeInHierarchy) return;
+        if (selected == null) return;
+        float W = Screen.width, H = Screen.height;
+        float rowH = 44f, topM = 16f;
+        float left = W - 516f;
+        float topY = H - 320f + topM;
+        string caso = (loader != null && loader.activeCase != null)
+            ? loader.activeCase : (loader != null && loader.data != null ? loader.data.combinacion : "");
+        GUI.contentColor = new Color(0.1f, 0.1f, 0.2f, 1f);
+        GUI.Label(new Rect(left, topY - 22f, 300f, 20f), $"Fuerzas i/j  [{caso}]");
+        for (int r = 0; r < DIAG_COMPS.Length; r++) {
+            GUI.color = DIAG_COL[r];
+            GUI.Label(new Rect(left + 2f, topY + r * rowH + 8f, 46f, 24f), DIAG_COMPS[r]);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(left + 48f, topY + r * rowH + 8f, 40f, 24f), DIAG_UNIT[r]);
+            float yi = -180f, yj = 180f;
+            List<float> v = selected.ForceFor(DIAG_COMPS[r], loader != null ? loader.activeCase : null);
+            if (v != null && v.Count >= 2) { yi = v[0]; yj = v[1]; }
+            GUI.color = new Color(0.15f, 0.15f, 0.25f, 1f);
+            GUI.Label(new Rect(left + 122f, topY + r * rowH + 8f, 96f, 24f),
+                      $"i:{yi,8:F2}");
+            GUI.Label(new Rect(left + 216f, topY + r * rowH + 8f, 120f, 24f),
+                      $"  j:{yj,8:F2}");
+        }
+        GUI.color = Color.white;
+        GUI.contentColor = Color.white;
     }
 
     static void DrawLine(Texture2D tex, int x0, int y0, int x1, int y1, Color col, int thick) {

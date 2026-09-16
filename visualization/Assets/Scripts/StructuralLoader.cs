@@ -19,6 +19,14 @@ public class StructuralLoader : MonoBehaviour {
     public Dictionary<string, NodeData> nodeById { get; private set; }
     public Dictionary<string, ElementResult> resById { get; private set; }
     public List<ElementMono> elementMonos { get; private set; }
+    public List<SlabMono> slabMonos { get; private set; }
+    public List<string> cases { get; private set; }
+    // caso -> id elemento -> componente -> [i, j]
+    public Dictionary<string, Dictionary<string, Dictionary<string, List<float>>>> resultsByCase;
+    // caso -> id nodo -> desplazamiento [dx, dy, dz] en coords OS
+    public Dictionary<string, Dictionary<string, Vector3>> displByCase;
+    // null = combinacion superpuesta; "G"/"Q"/"EX"/"EY" = caso individual
+    public string activeCase = null;
 
     readonly Dictionary<string, Vector2> planOff = new Dictionary<string, Vector2>();
     readonly Dictionary<string, float> elevOff = new Dictionary<string, float>();
@@ -94,6 +102,28 @@ public class StructuralLoader : MonoBehaviour {
         float eo = 0f;
         if (building != null && elevOff.TryGetValue(building, out var el)) eo = el;
         return new Vector3(x + off.x, z + eo, y + off.y);
+    }
+
+    /// <summary>Desplazamiento [dx,dy,dz] (coords OS) de un nodo para el caso
+    /// activo; caso null usa el campo superpuesto del nodo.</summary>
+    public Vector3 DisplFor(NodeData nd) {
+        if (activeCase != null && displByCase != null
+            && displByCase.TryGetValue(activeCase, out var byNode)
+            && byNode.TryGetValue(nd.id, out var d))
+            return d;
+        return new Vector3(nd.dx, nd.dy, nd.dz);
+    }
+
+    /// <summary>Posicion mundo de un nodo deformado (offsets de edificio incluidos).</summary>
+    public Vector3 NodePosDeformed(NodeData nd, float scale) {
+        Vector3 d = DisplFor(nd);
+        return ModelToWorld(nd.building,
+            nd.x + d.x * scale, nd.y + d.y * scale, nd.z + d.z * scale);
+    }
+
+    /// <summary>Posicion mundo de un nodo sin deformar (offsets de edificio incluidos).</summary>
+    public Vector3 NodePos(NodeData nd) {
+        return ModelToWorld(nd.building, nd.x, nd.y, nd.z);
     }
 
     Material MakeMaterial(Color c) {
@@ -183,7 +213,46 @@ public class StructuralLoader : MonoBehaviour {
         resById = new Dictionary<string, ElementResult>();
         foreach (var r in data.results) resById[r.id] = r;
 
+        cases = new List<string>();
+        resultsByCase = new Dictionary<string, Dictionary<string, Dictionary<string, List<float>>>>();
+        if (data.results_cases != null) {
+            foreach (var wr in data.results_cases) {
+                if (wr == null || string.IsNullOrEmpty(wr.name)) continue;
+                var byId = new Dictionary<string, Dictionary<string, List<float>>>();
+                if (wr.entries != null) {
+                    foreach (var en in wr.entries) {
+                        if (en == null) continue;
+                        var comps = new Dictionary<string, List<float>> {
+                            { "N", en.N }, { "Vy", en.Vy }, { "Mz", en.Mz },
+                            { "T", en.T }, { "My", en.My }, { "Vz", en.Vz },
+                            { "P", new List<float> { en.P } },
+                            { "M", new List<float> { en.M } },
+                        };
+                        byId[en.id] = comps;
+                    }
+                }
+                resultsByCase[wr.name] = byId;
+                cases.Add(wr.name);
+            }
+        }
+
+        displByCase = new Dictionary<string, Dictionary<string, Vector3>>();
+        if (data.displacements_cases != null) {
+            foreach (var wr in data.displacements_cases) {
+                if (wr == null || string.IsNullOrEmpty(wr.name)) continue;
+                var byNode = new Dictionary<string, Vector3>();
+                if (wr.entries != null) {
+                    foreach (var nd in wr.entries) {
+                        if (nd == null || nd.u == null || nd.u.Count < 3) continue;
+                        byNode[nd.node] = new Vector3(nd.u[0], nd.u[1], nd.u[2]);
+                    }
+                }
+                displByCase[wr.name] = byNode;
+            }
+        }
+
         elementMonos = new List<ElementMono>();
+        slabMonos = new List<SlabMono>();
         GameObject parent = new GameObject("Estructura");
         GameObject losasGroup = new GameObject("Losas");
         losasGroup.transform.SetParent(parent.transform, false);
@@ -268,6 +337,16 @@ public class StructuralLoader : MonoBehaviour {
                 go.GetComponent<Collider>().enabled = false;
                 go.GetComponent<Renderer>().sharedMaterial = matSlab;
                 go.transform.SetParent(losasGroup.transform, false);
+                var sm = go.AddComponent<SlabMono>();
+                sm.building = s.building;
+                sm.lvl = s.lvl;
+                sm.qG = s.qG;
+                sm.qQ = s.qQ;
+                sm.area = s.area;
+                sm.thickness = s.e;
+                sm.isVoladizo = false;
+                sm.id = go.name;
+                slabMonos.Add(sm);
             }
         }
 
@@ -283,12 +362,31 @@ public class StructuralLoader : MonoBehaviour {
                 go.GetComponent<Collider>().enabled = false;
                 go.GetComponent<Renderer>().sharedMaterial = matVol;
                 go.transform.SetParent(volGroup.transform, false);
+                var sm = go.AddComponent<SlabMono>();
+                sm.building = v.building;
+                sm.lvl = v.lvl;
+                sm.qG = 0f;
+                sm.qQ = 0f;
+                sm.area = v.area;
+                sm.thickness = v.e;
+                sm.isVoladizo = true;
+                sm.id = v.id;
+                slabMonos.Add(sm);
             }
         }
 
         Debug.Log($"[OK] Estructura: {data.elements.Count} elem, {data.nodes.Count} nodos, "
                   + $"{(data.slabs != null ? data.slabs.Count : 0)} losas, "
                   + $"{(data.voladizos != null ? data.voladizos.Count : 0)} voladizos.");
+    }
+
+    /// <summary>Activa/desactiva la seleccion de losas y voladizos (tecla L).</summary>
+    public void SetSlabSelection(bool on) {
+        if (slabMonos == null) return;
+        foreach (var sm in slabMonos) {
+            var c = sm != null ? sm.GetComponent<Collider>() : null;
+            if (c != null) c.enabled = on;
+        }
     }
 
     static Vector3 SlabCenter(SlabData s) {

@@ -164,7 +164,9 @@ def extraer_resultados(data):
 
 
 def analyze_building(bid, bdata, cfg):
-    """Analiza un edificio completo: G, Q, EX, EY + superposicion. Devuelve cases."""
+    """Analiza un edificio completo: G, Q, EX, EY + superposicion.
+    Devuelve (results_combo, ws, desplazamientos, cases_export, desplazamientos_cases).
+    """
     lambdas = cfg["cargas"]["superposicion_lambdas"]
     orden = cfg["niveles_losa"]
 
@@ -238,7 +240,28 @@ def analyze_building(bid, bdata, cfg):
             d[2] += lambdas[c] * val[2]
         desplazamientos[nid] = [round(v, 6) for v in d]
 
-    return results, ws, desplazamientos
+    # ---- Exportacion por caso individual ----
+    # cases_export: {caso: {eid: {N:[..], Vy:[..], sz, Ry, ...}}} con
+    # convencion [extremo_i, extremo_j] = [v, -v] igual a la combinacion.
+    comps_l = ["N_s", "Vy_s", "Vz_s", "T_s", "My_s", "Mz_s"]
+    comps_o = ["N", "Vy", "Vz", "T", "My", "Mz"]
+    cases_export = {}
+    desplazamientos_cases = {}
+    for c in combo:
+        fe, re, de = cases[c]
+        casos_f = {}
+        for eid in bdata["elements"]:
+            raw = fe[eid]
+            casos_f[eid] = {o: [round(raw[s], 2), round(-raw[s], 2)]
+                            for s, o in zip(comps_l, comps_o)}
+        cases_export[c] = casos_f
+        disp_c = {}
+        for nid in bdata["nodes"]:
+            v = de[nid]
+            disp_c[nid] = [round(v[0], 6), round(v[1], 6), round(v[2], 6)]
+        desplazamientos_cases[c] = disp_c
+
+    return results, ws, desplazamientos, cases_export, desplazamientos_cases
 
 
 def build_combinacion_nombre(configs):
@@ -248,6 +271,151 @@ def build_combinacion_nombre(configs):
         return "1.0G + 1.0Q + {:.2f}EX + {:.2f}EY".format(
             lam.get("EX", 1.0), lam.get("EY", 1.0))
     return "1.0G + 1.0Q + 0.9EX + 0.75EY"
+
+
+def _interp_mcap(P_curve, M_curve, p):
+    """M capacidad interpolada en la demanda P (mismo criterio que Unity)."""
+    if not P_curve or not M_curve or len(P_curve) < 2:
+        return None
+    for i in range(len(P_curve) - 1):
+        p0, p1 = P_curve[i], P_curve[i + 1]
+        m0, m1 = M_curve[i], M_curve[i + 1]
+        lo, hi = min(p0, p1), max(p0, p1)
+        if lo - 1e-9 <= p <= hi + 1e-9:
+            if abs(p1 - p0) < 1e-9:
+                return m0
+            t = (p - p0) / (p1 - p0)
+            return m0 + (m1 - m0) * t
+    idx = 0 if abs(P_curve[0] - p) <= abs(P_curve[-1] - p) else len(P_curve) - 1
+    return M_curve[idx]
+
+
+def export_reports(all_elements, all_results, all_results_cases,
+                   buildings, configs, pm_capacity):
+    """Escribe CSVs verificables: (1) cada elemento con todas sus fuerzas por
+    caso (G/Q/EX/EY) y combinacion + D/C; (2) cargas por nivel (qG/qQ, area,
+    peso y fuerza sismica)."""
+    import csv
+    os.makedirs("reports", exist_ok=True)
+    reports = ["G", "Q", "EX", "EY"]
+    comps = ["N", "Vy", "Vz", "T", "My", "Mz"]
+
+    capP, capM = {}, {}
+    for e in pm_capacity:
+        capP[e["section"]] = e.get("P") or []
+        capM[e["section"]] = e.get("M") or []
+
+    elem_by_id = {}
+    for en in all_elements:
+        elem_by_id[en["id"]] = en
+    if isinstance(all_results, list):
+        all_results = {r["id"]: r for r in all_results}
+    case_idx = {}
+    for caso in reports:
+        case_idx[caso] = {en["id"]: en for en in all_results_cases.get(caso, [])}
+
+    header = ["building", "tag", "type", "section", "material", "lvl", "phase",
+              "orient", "cad_id", "node_i", "node_j", "length_m", "trib_area_m2",
+              "wG_kN_m", "wQ_kN_m"]
+    for pre in reports + ["COMBO"]:
+        for c in comps:
+            header.append(f"{pre}_{c}_i")
+            header.append(f"{pre}_{c}_j")
+    header += ["COMBO_P_kN", "COMBO_M_kNm", "COMBO_Mcap_kNm", "COMBO_DC"]
+
+    def section_pm(etype, section):
+        if etype == "column":
+            for k in (section, "PILAR-70x70", "P-70x70"):
+                if k in capP:
+                    return capP[k], capM[k]
+        elif etype == "wall":
+            for k in (section, "M-20"):
+                if k in capP:
+                    return capP[k], capM[k]
+        return None, None
+
+    rows = []
+    ids = sorted(elem_by_id.keys(), key=lambda s: (elem_by_id[s]["building"], int(s)))
+    for eid in ids:
+        e = elem_by_id[eid]
+        nod = e.get("nodes") or ["", ""]
+        row = [e["building"], eid, e["type"], e["sectionTag"], e["material"],
+               e["lvl"], e["phase"], e.get("orient", ""), e["cad_id"],
+               nod[0] if len(nod) > 0 else "", nod[1] if len(nod) > 1 else "",
+               round(e["length"], 3), round(e["trib_area"], 3),
+               round(e["w_G"], 3), round(e["w_Q"], 3)]
+        combo = None
+        for pre in reports + ["COMBO"]:
+            src = all_results[eid] if pre == "COMBO" else case_idx[pre].get(eid)
+            if not src:
+                row += [""] * (2 * len(comps))
+                continue
+            if pre == "COMBO":
+                combo = src
+            for c in comps:
+                v = src.get(c)
+                if v and len(v) >= 2:
+                    row += [round(v[0], 3), round(v[1], 3)]
+                else:
+                    row += ["", ""]
+        if combo is not None:
+            row += [round(combo["P"], 2), round(combo["M"], 2)]
+            Pc = combo["P"]
+            Mcap = None
+            capPP, capMM = section_pm(e["type"], e["sectionTag"])
+            if capPP is not None:
+                Mcap = _interp_mcap(capPP, capMM, Pc)
+            if Mcap is not None and Mcap > 1e-6:
+                row += [round(Mcap, 2), round(combo["M"] / Mcap, 3)]
+            else:
+                row += ["", ""]
+        else:
+            row += ["", "", "", ""]
+        rows.append(row)
+
+    with open("reports/resultados_elementos.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+    # ---- Cargas por nivel (qG/qQ, area losa, W sismico, F sismica) ----
+    rowsL = []
+    for bid, bdata in buildings.items():
+        cfg = configs[bid]
+        elev_lvl = {lv["id"]: lv["elevation"] for lv in cfg["niveles"]}
+        phase_lvl = {lv["id"]: lv["phase"] for lv in cfg["niveles"]}
+        qG_lvl = {lv["id"]: lv.get("qG", 0.0) for lv in cfg["niveles"]}
+        qQ_lvl = {lv["id"]: lv.get("qQ", 0.0) for lv in cfg["niveles"]}
+        gx = [g["x"] for g in cfg["grilla_X"]]
+        gy = [g["y"] for g in cfg["grilla_Y"]]
+        xr = max(gx) - min(gx)
+        yr = max(gy) - min(gy)
+        ws = pesos_sismicos(cfg, bdata)
+        frac = cfg["cargas"]["sismo"]["fraccion_g"]
+        vbase = 0.0
+        for lvl in cfg.get("niveles_losa", []):
+            if lvl not in elev_lvl:
+                continue
+            W = ws[lvl]["W_kN"]
+            F = W * frac
+            vbase += F
+            rowsL.append([bid, lvl, phase_lvl.get(lvl, 1), round(elev_lvl[lvl], 3),
+                          qG_lvl.get(lvl, 0.0), qQ_lvl.get(lvl, 0.0),
+                          round(xr * yr, 2), round(W, 1), round(F, 1)])
+        vbase = round(vbase, 1)
+        for r in rowsL:
+            if r[0] == bid:
+                r.append(vbase)
+
+    with open("reports/resultados_cargas_niveles.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["building", "lvl", "phase", "z_m", "qG_kPa", "qQ_kPa",
+                    "losa_area_m2", "W_sismico_kN", "F_sismica_kN", "V_basal_kN"])
+        w.writerows(rowsL)
+
+    print(f"[OK] reportes CSV: reports/resultados_elementos.csv "
+          f"({len(rows)} filas), reports/resultados_cargas_niveles.csv "
+          f"({len(rowsL)} filas)")
 
 
 def run_staged_analysis():
@@ -268,6 +436,8 @@ def run_staged_analysis():
     all_nodes = []
     all_elements = []
     all_results = []
+    all_results_cases = {}   # caso -> lista de resultados por elemento
+    all_displacements_cases = {}  # caso -> nodo -> [dx, dy, dz]
     all_slabs = []
     all_voladizos = []
     all_apoyos = []
@@ -314,7 +484,8 @@ def run_staged_analysis():
     for bid, bdata in buildings.items():
         cfg = configs[bid]
         print(f"\n=== {bid}: {cfg['nombre']} ===")
-        results, ws, desplazamientos = analyze_building(bid, bdata, cfg)
+        results, ws, desplazamientos, cases_export, desplazamientos_cases = \
+            analyze_building(bid, bdata, cfg)
         r = bdata["resumen"]
         print(f"  [QA] {bid}: nodos={r['nodos']} col={r['columnas']} "
               f"vigas={r['vigas']} muros={r['muros']} losa={r['losa_area_m2']} m2")
@@ -355,6 +526,27 @@ def run_staged_analysis():
                 "T": r["T"], "My": r["My"], "Vz": r["Vz"],
                 "P": round(P_dem, 2), "M": round(M_dem, 2),
             })
+
+        # --- Exportacion por caso individual (G, Q, EX, EY) ---
+        # cases_export: {caso: {eid: {N:[..], Vy:[..], ...}}}, incluye P/M de demanda
+        for caso, fdict in cases_export.items():
+            for eid, fr in fdict.items():
+                base = {
+                    "N": fr["N"], "Vy": fr["Vy"], "Mz": fr["Mz"],
+                    "T": fr["T"], "My": fr["My"], "Vz": fr["Vz"],
+                }
+                P_dem = -fr["N"][0]
+                M_dem = max(math.hypot(fr["Mz"][0], fr["My"][0]),
+                            math.hypot(fr["Mz"][1], fr["My"][1]))
+                base["P"] = round(P_dem, 2)
+                base["M"] = round(M_dem, 2)
+                entry = {"id": eid, "building": bid, **base}
+                all_results_cases.setdefault(caso, []).append(entry)
+
+        # Desplazamientos por caso (para deformada por caso en Unity)
+        for caso, disp_dict in desplazamientos_cases.items():
+            all_displacements_cases[caso] = disp_dict
+
         if "PILAR-70x70" in capstore:
             add_pm("PILAR-70x70", capstore["PILAR-70x70"])
             add_pm("P-70x70", capstore["PILAR-70x70"])
@@ -403,21 +595,60 @@ def run_staged_analysis():
                     "fix": fix, "z": nd["z"],
                 })
 
+    # JsonUtility en Unity no deserializa diccionarios: se emiten como
+    # arrays de wrappers {name, entries} / {node, u} / {k, v}.
+    results_cases_out = [
+        {"name": caso, "entries": entries}
+        for caso, entries in all_results_cases.items()
+    ]
+    displacements_cases_out = []
+    for caso, disp_dict in all_displacements_cases.items():
+        displacements_cases_out.append({
+            "name": caso,
+            "entries": [{"node": nid, "u": u} for nid, u in disp_dict.items()],
+        })
+
+    metadatos = {
+        "fuente": "OpenSeesPy 3.5.2 - analisis elastico lineal (elasticBeamColumn 3D)",
+        "generador": "brain/02_opensees_analysis.py",
+        "materiales": [E_CONC, G_CONC, GAMMA],
+        "controles": [
+            {"k": "gravedad", "v": "eleLoad beamUniform w_G / w_Q (area tributaria x q)"},
+            {"k": "sismo", "v": "fuerzas nodales en diafragma segun pesos sismicos W=C*Sigma(P)"},
+            {"k": "superposicion", "v": "suma lineal de casos con lambdas de config"},
+            {"k": "validacion", "v": "Sigma(reacciones)=V0 EX/EY; conservation Sigma(w*L)=Sigma(Rz)"},
+        ],
+        "trazabilidad": [
+            {"k": "config_ED1", "v": "brain/edificio1_config.json"},
+            {"k": "config_ED2", "v": "brain/edificio_config_real.json"},
+            {"k": "planos_ED1", "v": "cad_files/dxf_L1/2017_67-*.dxf"},
+            {"k": "planos_ED2", "v": "cad_files/dxf_calculo/LT2_CAL_Planos/2024_22-*.dxf"},
+            {"k": "capacidad_pm", "v": "brain/cap_pm.json"},
+        ],
+    }
+
     final_output = {
         "schema": "structural_data/1.1",
         "nodes": all_nodes,
         "elements": all_elements,
         "results": all_results,
+        "results_cases": results_cases_out,
+        "displacements_cases": displacements_cases_out,
         "slabs": all_slabs,
         "voladizos": all_voladizos,
         "apoyos": all_apoyos,
         "pm_capacity": pm_capacity,
         "combinacion": build_combinacion_nombre(configs),
+        "casos": ["G", "Q", "EX", "EY"],
+        "metadata": metadatos,
     }
     unity_json_path = "visualization/Assets/StreamingAssets/structural_data.json"
     os.makedirs(os.path.dirname(unity_json_path), exist_ok=True)
     with open(unity_json_path, "w") as f:
         json.dump(final_output, f, indent=2)
+
+    export_reports(all_elements, all_results, all_results_cases,
+                   buildings, configs, pm_capacity)
 
     total_n = sum(b["resumen"]["nodos"] for b in buildings.values())
     total_c = sum(b["resumen"]["columnas"] for b in buildings.values())
@@ -427,6 +658,7 @@ def run_staged_analysis():
     print(f"  nodos={total_n} col={total_c} vigas={total_v} muros={total_m}")
     print(f"  elementos exportados: {len(all_elements)}")
     print(f"  losas exportadas: {len(all_slabs)}, voladizos: {len(all_voladizos)}")
+    print(f"  casos individuales exportados: {list(all_results_cases.keys())}")
     print(f"\n[OK] JSON exportado a: {unity_json_path}")
     print("\n-------------------------------------------")
     print(">>> RESULTADO: PASO 3 COMPLETADO CON EXITO <<<")

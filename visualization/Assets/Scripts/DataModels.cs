@@ -93,9 +93,46 @@ public class StructuralDataset {
     public List<NodeData> nodes;
     public List<ElementData> elements;
     public List<ElementResult> results;
+    public List<CaseResultsWrapper> results_cases;
+    public List<CaseDisplacementWrapper> displacements_cases;
+    public List<string> casos;
     public List<SlabData> slabs;
     public List<VoladizoData> voladizos;
     public List<ApoyoData> apoyos;
     public List<PMCapacityEntry> pm_capacity;
     public string combinacion;
+    public ModelMetadata metadata;
+}
+
+[Serializable]
+public class CaseResultsWrapper {
+    public string name;
+    public List<ElementResult> entries;
+}
+
+[Serializable]
+public class CaseDisplacementWrapper {
+    public string name;
+    public List<NodeDisplacementData> entries;
+}
+
+[Serializable]
+public class NodeDisplacementData {
+    public string node;
+    public List<float> u;
+}
+
+[Serializable]
+public class StrEntry {
+    public string k;
+    public string v;
+}
+
+[Serializable]
+public class ModelMetadata {
+    public string fuente;
+    public string generador;
+    public List<float> materiales;
+    public List<StrEntry> controles;
+    public List<StrEntry> trazabilidad;
 }

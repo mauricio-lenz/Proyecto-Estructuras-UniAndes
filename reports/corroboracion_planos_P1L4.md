@@ -64,6 +64,8 @@ y con `brain/capacidad.py` (curvas P-M columna PILAR-70x70 y muro M-20).
 |----------|-------|
 | schema | structural_data/1.1 |
 | nodos / elementos / resultados | 206 / 470 / 470 |
+| resultados por caso (G,Q,EX,EY) | 470 x 4 |
+| desplazamientos por caso | 206 nodos x 4 |
 | losas | 10 |
 | voladizos | 2 (VOL-ESTE Piso3/Piso4 ED1) |
 | apoyos | 26 |
@@ -72,3 +74,49 @@ y con `brain/capacidad.py` (curvas P-M columna PILAR-70x70 y muro M-20).
 
 Verificacion de consistencia interna (unicidad de ids, referencias de nodos
 resueltas, resultados 1:1 con elementos): **OK**.
+
+## 5. Fuente de los resultados y como se cargan en Unity
+
+Pipeline de simulacion (trazabilidad completa en `metadata` del JSON):
+
+1. **Planos DXF** -> `brain/01b_extract_dwg.py` + `01_geometry_stages.py` generan
+   `brain/geometry_stages.json` (nodos, elementos, losas, apoyos, configs).
+2. **Analisis** -> `brain/02_opensees_analysis.py` (OpenSeesPy 3.5.2) construye un
+   modelo `elasticBeamColumn` 3D con `rigidDiaphragm` por piso y resuelve 4 casos:
+   **G** (gravedad muerta), **Q** (sobrecarga), **EX**, **EY** (sismo con
+   W=C·ΣP, C=0.20). La combinacion es la suma lineal `1.0G+1.0Q+0.90EX+0.75EY`
+   (lambdas de `superposicion_lambdas` en las configs).
+3. **Exportacion** -> el mismo script escribe `structural_data.json`
+   (schema 1.1) con: fuerzas por elemento (N,Vy,Vz,T,My,Mz) para cada caso,
+   desplazamientos nodales por caso, deformada superpuesta, `pm_capacity`
+   (curvas P-M) y `metadata` (fuente, generador, materiales [E,G,γ],
+   controles y trazabilidad).
+4. **Unity** -> `StructuralLoader.cs` (`BuildStructureFromJSON`) deserializa el
+   JSON con `JsonUtility` (por eso los casos se emiten como arrays de wrappers
+   `{name, entries}` y el metadata como `{k, v}`, ya que JsonUtility no soporta
+   diccionarios) y une ED1+ED2 con `ComputePlanOffsets()` (réplica de
+   `P1L2ModelBuilder` del viewer P1L2). `PostProcessing.cs` y `UIInspector.cs`
+   leen el caso activo (`loader.activeCase`) para dibujar y reportar.
+
+## 6. Diagramas por caso y combinacion
+
+- Tecla **C** (o botones en pantalla "Caso G/Q/EX/EY/Combinacion") cambia el caso
+  activo; afecta a la deformada **D**, diagrama de momentos **M**, axial **N** y
+  al panel de inspeccion (fuerzas y demanda/capacidad P-M del elemento).
+- La deformada usa los desplazamientos del caso con los offsets de union de
+  edificios (misma transformacion que la geometria), corregido en esta version.
+- La demanda/capacidad se recalcula para el caso activo usando la curva P-M del
+  elemento (`InterpCapacityM`) y se marca D/C>1 como "EXCEDE".
+
+## 7. Reportes verificables
+
+- **`reports/resultados_elementos.csv`** — 470 elementos, 79 columnas:
+  identificacion (building, tag, tipo, seccion, material, nivel, fase, orient, cad_id,
+  nodos, largo) + fuerzas internas (N,Vy,Vz,T,My,Mz) en i y j para cada caso
+  individual (G/Q/EX/EY) y la combinacion, mas demanda P-M y D/C.
+- **`reports/resultados_cargas_niveles.csv`** — 10 niveles, 10 columnas:
+  edificio, nivel, fase, z, qG, qQ, area losa, W sismico, F sismica, V basal.
+- En Unity, al seleccionar un elemento (columna, viga, muro), se muestran
+  graficos de fuerzas internas (N,Vy,Vz,T,My,Mz) con valores en i y j,
+  ademas del grafico de curva P-M con punto de demanda. La tecla **L** activa
+  la seleccion de losas/voladizos (muestra solo datos de carga; sin graficos).

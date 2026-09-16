@@ -745,9 +745,11 @@ MonoBehaviour:
     Claro: fase 1 
     Oscuro: fase 2
 
-    D: deformada   M: momentos
+    D: deformada   M: momentos   N: axial
 
-    N: axial   Click: seleccionar y PM
+    C: cambiar caso   Click: seleccionar y PM
+
+    L: seleccionar losas
 
     Der:rotar  Rueda:zoom  F:encuadrar
 

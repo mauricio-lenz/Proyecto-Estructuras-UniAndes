@@ -13,18 +13,86 @@ public class StructuralLoader : MonoBehaviour {
     public Material matVol;
     public Material matApoyo;
 
+    public bool unirEdificios = true;
+
     public StructuralDataset data { get; private set; }
     public Dictionary<string, NodeData> nodeById { get; private set; }
     public Dictionary<string, ElementResult> resById { get; private set; }
     public List<ElementMono> elementMonos { get; private set; }
+
+    readonly Dictionary<string, Vector2> planOff = new Dictionary<string, Vector2>();
+    readonly Dictionary<string, float> elevOff = new Dictionary<string, float>();
 
     void Start() {
         string jsonPath = Path.Combine(Application.streamingAssetsPath, "structural_data.json");
         BuildStructureFromJSON(jsonPath);
     }
 
-    Vector3 ModelToWorld(float x, float y, float z) {
-        return new Vector3(x, z, y);
+    // Réplica de P1L2ModelBuilder.ComputePlanOffsets del viewer P1L2 (unirEdificios):
+    // si hay 2 edificios, elimina el hueco uniéndolos por su lado angosto (cara
+    // corta), alinea los rangos en planta y sube el más bajo hasta igualar el
+    // nivel superior del más alto (techos a la misma altura).
+    void ComputePlanOffsets() {
+        planOff.Clear();
+        elevOff.Clear();
+        if (data == null || data.nodes == null || data.nodes.Count == 0) return;
+
+        var count = new Dictionary<string, int>();
+        var mins = new Dictionary<string, Vector2>();
+        var maxs = new Dictionary<string, Vector2>();
+        var maxZ = new Dictionary<string, float>();
+
+        foreach (var n in data.nodes) {
+            string b = string.IsNullOrEmpty(n.building) ? "ED1" : n.building;
+            if (!mins.ContainsKey(b)) {
+                mins[b] = new Vector2(float.MaxValue, float.MaxValue);
+                maxs[b] = new Vector2(float.MinValue, float.MinValue);
+                maxZ[b] = float.MinValue;
+            }
+            count[b]++;
+            mins[b] = new Vector2(Mathf.Min(mins[b].x, n.x), Mathf.Min(mins[b].y, n.y));
+            maxs[b] = new Vector2(Mathf.Max(maxs[b].x, n.x), Mathf.Max(maxs[b].y, n.y));
+            maxZ[b] = Mathf.Max(maxZ[b], n.z);
+        }
+
+        var keys = new List<string>(mins.Keys);
+        foreach (var k in keys) { planOff[k] = Vector2.zero; elevOff[k] = 0f; }
+
+        if (!unirEdificios || keys.Count < 2) return;
+
+        keys.Sort();
+        string A = count[keys[0]] >= count[keys[1]] ? keys[0] : keys[1];
+        string B = A == keys[0] ? keys[1] : keys[0];
+
+        var minA = mins[A]; var maxA = maxs[A];
+        var minB = mins[B]; var maxB = maxs[B];
+        float dxA = maxA.x - minA.x, dyA = maxA.y - minA.y;
+        float dxB = maxB.x - minB.x, dyB = maxB.y - minB.y;
+
+        Vector2 offB;
+        if (dxA >= dyA && dxB >= dyB) {
+            offB.y = minA.y - minB.y;
+            offB.x = minA.x - maxB.x;
+        } else {
+            offB.x = minA.x - minB.x;
+            offB.y = maxA.y - minB.y;
+        }
+        planOff[B] = offB;
+
+        float top = Mathf.Max(maxZ[A], maxZ[B]);
+        elevOff[A] = top - maxZ[A];
+        elevOff[B] = top - maxZ[B];
+
+        Debug.Log($"[P1L4] unirEdificios: A={A} B={B} planOff[B]={offB} " +
+                  $"elevOff A={elevOff[A]} B={elevOff[B]}");
+    }
+
+    Vector3 ModelToWorld(string building, float x, float y, float z) {
+        Vector2 off = Vector2.zero;
+        if (building != null && planOff.TryGetValue(building, out var po)) off = po;
+        float eo = 0f;
+        if (building != null && elevOff.TryGetValue(building, out var el)) eo = el;
+        return new Vector3(x + off.x, z + eo, y + off.y);
     }
 
     Material MakeMaterial(Color c) {
@@ -108,6 +176,7 @@ public class StructuralLoader : MonoBehaviour {
         }
 
         EnsureMaterials();
+        ComputePlanOffsets();
         nodeById = new Dictionary<string, NodeData>();
         foreach (var nd in data.nodes) nodeById[nd.id] = nd;
         resById = new Dictionary<string, ElementResult>();
@@ -125,7 +194,7 @@ public class StructuralLoader : MonoBehaviour {
             if (nd.fix == null || nd.fix.Count < 1 || nd.fix[0] != 1) continue;
             var s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             s.name = "APOYO-" + nd.id;
-            s.transform.position = ModelToWorld(nd.x, nd.y, nd.z);
+            s.transform.position = ModelToWorld(nd.building, nd.x, nd.y, nd.z);
             s.transform.localScale = Vector3.one * 0.8f;
             s.GetComponent<Renderer>().sharedMaterial = matApoyoObj;
             s.transform.SetParent(parent.transform, false);
@@ -136,8 +205,8 @@ public class StructuralLoader : MonoBehaviour {
             if (!nodeById.TryGetValue(ed.nodes[0], out var n1) ||
                 !nodeById.TryGetValue(ed.nodes[1], out var n2)) continue;
 
-            Vector3 p1 = ModelToWorld(n1.x, n1.y, n1.z);
-            Vector3 p2 = ModelToWorld(n2.x, n2.y, n2.z);
+            Vector3 p1 = ModelToWorld(n1.building, n1.x, n1.y, n1.z);
+            Vector3 p2 = ModelToWorld(n2.building, n2.x, n2.y, n2.z);
             Material mat = MaterialFor(ed.type, ed.phase);
 
             GameObject go;
@@ -194,7 +263,7 @@ public class StructuralLoader : MonoBehaviour {
                 var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 go.name = $"Losas-{s.lvl}-{s.building}";
                 go.transform.localScale = new Vector3(dx, s.e, dy);
-                go.transform.position = ModelToWorld(center.x, center.y, s.z + s.e / 2f);
+                go.transform.position = ModelToWorld(s.building, center.x, center.y, s.z + s.e / 2f);
                 go.GetComponent<Collider>().enabled = false;
                 go.GetComponent<Renderer>().sharedMaterial = matSlab;
                 go.transform.SetParent(losasGroup.transform, false);
@@ -209,7 +278,7 @@ public class StructuralLoader : MonoBehaviour {
                 var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 go.name = v.id;
                 go.transform.localScale = new Vector3(dx, v.e, dy);
-                go.transform.position = ModelToWorld(center.x, center.y, v.z + v.e / 2f);
+                go.transform.position = ModelToWorld(v.building, center.x, center.y, v.z + v.e / 2f);
                 go.GetComponent<Collider>().enabled = false;
                 go.GetComponent<Renderer>().sharedMaterial = matVol;
                 go.transform.SetParent(volGroup.transform, false);

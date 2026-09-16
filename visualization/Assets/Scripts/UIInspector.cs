@@ -10,25 +10,74 @@ public class UIInspector : MonoBehaviour {
 
     private ElementMono selected;
     private Material lastHighMat;
+    private bool panelVisible = true;
 
     void Awake() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
         SetupPanel();
     }
 
-    /// <summary>Ancho grande + fuente monoespaciada para que la tabla numérica quede alineada.</summary>
+    /// <summary>
+    /// Agranda el panel, sube la fuente monoespaciada y coloca un fondo blanco
+    /// semitransparente detrás del texto para que la tabla se lea sin tapar la
+    /// estructura (panel al borde izquierdo; tecla P lo oculta/muestra).
+    /// </summary>
     void SetupPanel() {
         if (txtElementInfo == null) return;
         var rt = txtElementInfo.rectTransform;
-        if (rt != null) rt.sizeDelta = new Vector2(600f, 700f);
+        if (rt != null) {
+            float w = Mathf.Clamp(Screen.width * 0.45f, 640f, 1100f);
+            float h = Mathf.Clamp(Screen.height - 170f, 500f, 1200f);
+            rt.sizeDelta = new Vector2(w, h);
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 1f);
+            rt.anchoredPosition = new Vector2(16f, -16f);
+        }
+        txtElementInfo.color = new Color(0.05f, 0.05f, 0.1f, 1f);
+        txtElementInfo.fontSize = 20;
+        txtElementInfo.lineSpacing = 1.05f;
+        txtElementInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
         Font mono = null;
-        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 15); }
+        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 20); }
         catch (System.Exception) { }
         if (mono != null) txtElementInfo.font = mono;
+        EnsureBackground(rt);
+        if (pmPlotCanvas != null) {
+            pmPlotCanvas.rectTransform.sizeDelta = new Vector2(320f, 320f);
+        }
+    }
+
+    /// <summary>Crea (o reusa) un Image blanco semitransparente detrás del texto.</summary>
+    void EnsureBackground(RectTransform parent) {
+        if (parent == null) return;
+        Image bg = null;
+        for (int i = 0; i < parent.childCount; i++) {
+            var img = parent.GetChild(i).GetComponent<Image>();
+            if (img != null && img.gameObject.name == "Fondo") { bg = img; break; }
+        }
+        if (bg == null) {
+            var go = new GameObject("Fondo", typeof(RectTransform),
+                                    typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+            bg = go.GetComponent<Image>();
+            bg.color = new Color(1f, 1f, 1f, 0.93f);
+            bg.raycastTarget = false;
+            bg.transform.SetAsFirstSibling();
+        }
+        bg.rectTransform.anchorMin = Vector2.zero;
+        bg.rectTransform.anchorMax = Vector2.one;
+        bg.rectTransform.offsetMin = Vector2.zero;
+        bg.rectTransform.offsetMax = Vector2.zero;
     }
 
     void Update() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
+        if (Input.GetKeyDown(KeyCode.P)) {
+            panelVisible = !panelVisible;
+            if (txtElementInfo != null) txtElementInfo.gameObject.SetActive(panelVisible);
+            if (pmPlotCanvas != null) pmPlotCanvas.gameObject.SetActive(panelVisible);
+        }
         if (Input.GetMouseButtonDown(0) && loader != null) {
             Ray ray = Camera.main != null
                 ? Camera.main.ScreenPointToRay(Input.mousePosition) : new Ray();
@@ -132,7 +181,7 @@ public class UIInspector : MonoBehaviour {
             sb.AppendLine("  (sin curva P-M: seccion de viga -> revisar Mz envolvente)");
         }
         sb.AppendLine(line);
-        sb.AppendLine("Clic derecho: rotar   Rueda: zoom   F: reencuadrar");
+        sb.AppendLine("Clic derecho: rotar   Rueda: zoom   F: reencuadrar   P: ocultar panel");
         txtElementInfo.text = sb.ToString();
     }
 
@@ -188,7 +237,7 @@ public class UIInspector : MonoBehaviour {
 
     void DrawPmPlot(ElementMono el) {
         if (pmPlotCanvas == null) return;
-        int size = 180;
+        int size = 320;
         var tex = new Texture2D(size, size);
         Color bg = new Color(0.95f, 0.95f, 0.98f, 1f);
         Color axCol = new Color(0.3f, 0.3f, 0.3f, 1f);

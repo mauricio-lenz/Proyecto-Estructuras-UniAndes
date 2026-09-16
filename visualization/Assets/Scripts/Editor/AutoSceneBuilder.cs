@@ -44,22 +44,23 @@ public class AutoSceneBuilder {
         Canvas canvas = canvasObj.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
-        // Panel de información grande (recuadro seleccionado)
+        // Panel de información grande (recuadro seleccionado). UIInspector.SetupPanel
+        // lo reconfigura en runtime (fondo blanco, fuente mono, tamaño según pantalla).
         GameObject infoObj = new GameObject("TxtInfo", typeof(RectTransform), typeof(Text));
         infoObj.transform.SetParent(canvasObj.transform, false);
         Text txtInfo = infoObj.GetComponent<Text>();
         txtInfo.font = BuiltinFont();
-        txtInfo.fontSize = 14;
-        txtInfo.color = Color.black;
+        txtInfo.fontSize = 20;
+        txtInfo.color = new Color(0.05f, 0.05f, 0.1f, 1f);
         txtInfo.alignment = TextAnchor.UpperLeft;
         txtInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
         txtInfo.verticalOverflow = VerticalWrapMode.Overflow;
         RectTransform rtInfo = infoObj.GetComponent<RectTransform>();
-        rtInfo.anchorMin = new Vector2(0, 0.5f);
+        rtInfo.anchorMin = new Vector2(0, 1);
         rtInfo.anchorMax = new Vector2(0, 1);
         rtInfo.pivot = new Vector2(0, 1);
-        rtInfo.anchoredPosition = new Vector2(20, -20);
-        rtInfo.sizeDelta = new Vector2(380, 460);
+        rtInfo.anchoredPosition = new Vector2(16, -16);
+        rtInfo.sizeDelta = new Vector2(900, 1000);
         txtInfo.text = "Haz clic en un elemento de la estructura...";
 
         // Gráfico P-M RawImage
@@ -70,8 +71,8 @@ public class AutoSceneBuilder {
         rtImg.anchorMin = new Vector2(1, 0);
         rtImg.anchorMax = new Vector2(1, 0);
         rtImg.pivot = new Vector2(1, 0);
-        rtImg.anchoredPosition = new Vector2(-20, 120);
-        rtImg.sizeDelta = new Vector2(180, 180);
+        rtImg.anchoredPosition = new Vector2(-20, 160);
+        rtImg.sizeDelta = new Vector2(320, 320);
 
         // Leyenda de tipos
         GameObject legObj = new GameObject("TxtLeyenda", typeof(RectTransform), typeof(Text));
@@ -86,7 +87,7 @@ public class AutoSceneBuilder {
         rtLeg.pivot = new Vector2(1, 1);
         rtLeg.anchoredPosition = new Vector2(-20, -20);
         rtLeg.sizeDelta = new Vector2(220, 80);
-        txtLeg.text = "ED1 + ED2 (2017_67 + 2024_22)\nAZUL:col  NARANJA:vig  VERDE:muro\nClaro:fase1  Oscuro:fase2\n\nD: deformada   M: momentos\nN: axial   Click: seleccionar y PM\nDer:rotar  Rueda:zoom  F:encuadrar";
+        txtLeg.text = "ED1 + ED2 (2017_67 + 2024_22)\nAZUL:col  NARANJA:vig  VERDE:muro\nClaro:fase1  Oscuro:fase2\n\nD: deformada   M: momentos\nN: axial   Click: seleccionar y PM\nDer:rotar  Rueda:zoom  F:encuadrar  P:panel";
 
         // 3. Manager Estructural
         GameObject manager = new GameObject("StructuralManager", typeof(StructuralLoader), typeof(UIInspector), typeof(PostProcessing));

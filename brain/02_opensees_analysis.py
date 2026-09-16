@@ -3,27 +3,22 @@ import os
 import math
 import openseespy.opensees as ops
 
-GAMMA = 25.0  # kN/m3
-E_CONC = 2.5e7  # kPa
-G_CONC = 1.0e7  # kPa
-
-# Todos positivos en compresion/traccion coo OpenSees (fuera local).
-# (Se rellenan por seccion en secciones())
-MONKEY_SECC = {}
+GAMMA = 25.0
+E_CONC = 2.5e7
+G_CONC = 1.0e7
 
 
 def secciones():
-    """Propiedades de seccion para los tags usados en ED2."""
     return {
         "PILAR-70x70": {"A": 0.49, "Iy": 0.0200083, "Iz": 0.0200083, "J": 0.03376, "b": 0.7, "h": 0.7},
-        "V-60x80": {"A": 0.48, "Iy": 0.0144, "Iz": 0.0256, "J": 0.0312, "b": 0.6, "h": 0.8},
-        "V-45x30": {"A": 0.135, "Iy": 0.002534, "Iz": 0.0010125, "J": 0.0022, "b": 0.45, "h": 0.3},
-        "V-40x80": {"A": 0.32, "Iy": 0.009600, "Iz": 0.017067, "J": 0.0212, "b": 0.4, "h": 0.8},
+        "P-70x70":     {"A": 0.49, "Iy": 0.0200083, "Iz": 0.0200083, "J": 0.03376, "b": 0.7, "h": 0.7},
+        "V-60x80":     {"A": 0.48, "Iy": 0.0144, "Iz": 0.0256, "J": 0.0312, "b": 0.6, "h": 0.8},
+        "V-45x30":     {"A": 0.135, "Iy": 0.002534, "Iz": 0.0010125, "J": 0.0022, "b": 0.45, "h": 0.3},
+        "V-40x80":     {"A": 0.32, "Iy": 0.009600, "Iz": 0.017067, "J": 0.0212, "b": 0.4, "h": 0.8},
     }
 
 
 def seccion_muro(L):
-    """M-20: muro e=0.20 como elemento de linea en su plano."""
     t = 0.20
     return {"A": t * L, "Iy": L * t ** 3 / 12.0, "Iz": t * L ** 3 / 12.0,
             "J": 0.5 * t ** 4, "b": t, "h": L}
@@ -38,45 +33,37 @@ def transf_for(nodes, edata):
 
 
 def construir_modelo(data):
-    """Construye el modelo 3D con diafragmas rigidos por piso."""
     nodes, elements = data["nodes"], data["elements"]
-
     ops.wipe()
     ops.model("basic", "-ndm", 3, "-ndf", 6)
-
     for nid, ndata in nodes.items():
         ops.node(int(nid), ndata["x"], ndata["y"], ndata["z"])
         fix = ndata.get("fix", [0, 0, 0, 0, 0, 0])
         if sum(fix) > 0:
             ops.fix(int(nid), *fix)
-
-    # Diafragmas rigidos por piso (constrain en plano X-Y de cada nivel)
-    # Master = cruce de columna real (rigidez vertical asegurada), sin fix
     for lvl, mid in data["masters"].items():
-        lvl_node_ids = [nid for nid, nd in nodes.items() if nd["floor"] == nodes[mid]["floor"]]
-        slaves = [int(nid) for nid in lvl_node_ids if nid != mid]
+        mid_floor = nodes[str(mid)]["floor"]
+        lvl_node_ids = [nid for nid, nd in nodes.items()
+                        if nd["floor"] == mid_floor]
+        slaves = [int(nid) for nid in lvl_node_ids if nid != str(mid)]
         if slaves:
             ops.rigidDiaphragm(3, int(mid), *slaves)
-
-    # Transformaciones geometricas
-    ops.geomTransf("Linear", 1, 1.0, 0.0, 0.0)   # columnas (eje Z local)
-    ops.geomTransf("Linear", 2, 0.0, 0.0, 1.0)   # vigas eje X
-    ops.geomTransf("Linear", 3, 0.0, 0.0, 1.0)   # vigas eje Y
-
+    ops.geomTransf("Linear", 1, 1.0, 0.0, 0.0)
+    ops.geomTransf("Linear", 2, 0.0, 0.0, 1.0)
+    ops.geomTransf("Linear", 3, 0.0, 0.0, 1.0)
     secc = secciones()
     for eid, edata in elements.items():
         transf = transf_for(nodes, edata)
         if edata["type"] == "wall":
             p = seccion_muro(edata["length"])
         else:
-            p = secc[edata["sectionTag"]]
+            p = secc.get(edata["sectionTag"], secc["V-60x80"])
         ops.element("elasticBeamColumn", int(eid),
                     *[int(n) for n in edata["nodes"]],
                     p["A"], E_CONC, G_CONC, p["J"], p["Iy"], p["Iz"], transf)
 
 
 def aplicar_gravedad(data, q_lvl, tag_patron=1, tag_series=1, escala=1.0):
-    """Aplica carga uniforme por piso (geometria tributaria). Devuelve total kN."""
     elements = data["elements"]
     ops.timeSeries("Linear", tag_series)
     ops.pattern("Plain", tag_patron, tag_series)
@@ -93,7 +80,6 @@ def aplicar_gravedad(data, q_lvl, tag_patron=1, tag_series=1, escala=1.0):
 
 
 def aplicar_sismo(data, direccion, fuerzas, tag_patron=2, tag_series=2):
-    """Fuerzas laterales en el CM de cada piso con wrench (metodologia P1L3)."""
     cm = centros_de_masa(data)
     nodes, masters = data["nodes"], data["masters"]
     ops.timeSeries("Linear", tag_series)
@@ -112,7 +98,6 @@ def aplicar_sismo(data, direccion, fuerzas, tag_patron=2, tag_series=2):
 
 
 def centros_de_masa(data):
-    """CM por piso = centroide del rectangulo de losa (ED2 sin voladizos)."""
     xs = sorted({nd["x"] for nd in data["nodes"].values()})
     ys = sorted({nd["y"] for nd in data["nodes"].values()})
     area_main = (max(xs) - min(xs)) * (max(ys) - min(ys))
@@ -122,7 +107,6 @@ def centros_de_masa(data):
 
 
 def pesos_sismicos(cfg, data):
-    """W_i = PP_i + 0.5 Q_i ; PP = qG*A + peso estructura del piso."""
     area = centros_de_masa(data)
     qG = {lv["id"]: lv["qG"] for lv in cfg["niveles"]}
     qQ = {lv["id"]: lv["qQ"] for lv in cfg["niveles"]}
@@ -153,7 +137,6 @@ def configurar_y_analizar():
 
 
 def extraer_resultados(data):
-    """Fuerzas basicas por elemento (local) y reacciones + desplazamientos."""
     fuerzas = {}
     for eid in data["elements"]:
         f = ops.basicForce(int(eid))
@@ -168,170 +151,142 @@ def extraer_resultados(data):
     return fuerzas, reac
 
 
-def run_staged_analysis():
-    print("=== ANALISIS OPENSEES REAL (PASO 3) ===")
-
-    geom_path = "brain/geometry_stages.json"
-    cfg_path = "brain/edificio_config_real.json"
-    if not os.path.exists(geom_path):
-        print("[ERROR] No se encontró 'brain/geometry_stages.json'.")
-        return
-    with open(geom_path, "r") as f:
-        data = json.load(f)
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
+def analyze_building(bid, bdata, cfg):
+    """Analiza un edificio completo: G, Q, EX, EY + superposicion. Devuelve cases."""
     lambdas = cfg["cargas"]["superposicion_lambdas"]
     orden = cfg["niveles_losa"]
 
-    # ============ PESOS Y FUERZAS SISMICAS ============
-    ws = pesos_sismicos(cfg, data)
+    ws = pesos_sismicos(cfg, bdata)
     frac = cfg["cargas"]["sismo"]["fraccion_g"]
     fuerzas_EX = {lvl: ws[lvl]["W_kN"] * frac for lvl in orden}
     fuerzas_EY = {lvl: ws[lvl]["W_kN"] * frac for lvl in orden}
-
-    print("\n--- Pesos sismicos por piso ---")
-    for lvl in orden:
-        print(f"  {lvl:7s} A={ws[lvl]['area_m2']:6.1f} m2  PP={ws[lvl]['PP_kN']:8.1f} "
-              f"Q={ws[lvl]['Q_kN']:7.1f}  W={ws[lvl]['W_kN']:8.1f} kN "
-              f"  F={fuerzas_EX[lvl]:7.1f} kN")
     lateral_EX = sum(fuerzas_EX.values())
-    lateral_EY = sum(fuerzas_EY.values())
-    print(f"  Carga lateral total: EX={lateral_EX:.1f} kN  EY={lateral_EY:.1f} kN")
 
-    # ============ CASOS BASE ============
-    casos = {}
-    data_Q_carga = None
+    print(f"\n  --- {bid} pesos sismicos ---")
+    for lvl in orden:
+        print(f"    {lvl:12s} A={ws[lvl]['area_m2']:7.1f} m2  W={ws[lvl]['W_kN']:8.1f} kN  F={fuerzas_EX[lvl]:7.1f} kN")
+    print(f"    V_basal total: EX={lateral_EX:.1f} kN")
 
-    # Caso G
-    construir_modelo(data)
-    total_G = aplicar_gravedad(data, "G")
+    cases = {}
+
+    construir_modelo(bdata)
+    aplicar_gravedad(bdata, "G")
     configurar_y_analizar()
-    fG, rG = extraer_resultados(data)
-    casos["G"] = (fG, rG)
-    qG_lvl = {lvl: next(lv["qG"] for lv in cfg["niveles"] if lv["id"] == lvl)
-              for lvl in orden}
-    g_total_losa = sum(qG_lvl[l] * data["area_losa_lvl"][l] for l in orden)
-    print(f"\n[Caso G] Carga transferida por tributarias: {total_G:.2f} kN "
-          f"(qG*A={g_total_losa:.2f} kN)")
+    fG, rG = extraer_resultados(bdata)
+    cases["G"] = (fG, rG)
+    print(f"    [G] OK reacciones Fz={sum(r[2] for r in rG.values()):.1f} kN")
 
-    # Caso Q
-    construir_modelo(data)
-    total_Q = aplicar_gravedad(data, "Q")
+    construir_modelo(bdata)
+    aplicar_gravedad(bdata, "Q")
     configurar_y_analizar()
-    fQ, rQ = extraer_resultados(data)
-    casos["Q"] = (fQ, rQ)
-    q_total_por_piso = {lvl: ws[lvl]["qQ"] * ws[lvl]["area_m2"] for lvl in orden}
-    print(f"\n[Caso Q] Carga transferida: {total_Q:.2f} kN  (qQ*A={sum(q_total_por_piso.values()):.2f} kN)")
-    reac_fz_Q = sum(r[2] for r in rQ.values())
-    print(f"         Reacciones Fz: {reac_fz_Q:.2f} kN | "
-          f"rel={abs(reac_fz_Q - total_Q)/total_Q:.2e}")
+    fQ, rQ = extraer_resultados(bdata)
+    cases["Q"] = (fQ, rQ)
 
-    # Caso EX
-    construir_modelo(data)
-    aplicar_sismo(data, "EX", fuerzas_EX)
+    construir_modelo(bdata)
+    aplicar_sismo(bdata, "EX", fuerzas_EX)
     configurar_y_analizar()
-    fEX, rEX = extraer_resultados(data)
-    casos["EX"] = (fEX, rEX)
+    fEX, rEX = extraer_resultados(bdata)
+    cases["EX"] = (fEX, rEX)
     corte_EX = sum(r[0] for r in rEX.values())
-    desp_EX = ops.nodeDisp(int(data["masters"]["piso4"]))[0]
-    print(f"\n[Caso EX] corte basal={corte_EX:.1f} kN vs {lateral_EX:.1f} kN "
-          f"| desp techo={desp_EX:.4f} m | sentido_ok={desp_EX >= 0}")
+    print(f"    [EX] corte={corte_EX:.1f} kN vs {lateral_EX:.1f} kN")
 
-    # Caso EY
-    construir_modelo(data)
-    aplicar_sismo(data, "EY", fuerzas_EY)
+    construir_modelo(bdata)
+    aplicar_sismo(bdata, "EY", fuerzas_EY)
     configurar_y_analizar()
-    fEY, rEY = extraer_resultados(data)
-    casos["EY"] = (fEY, rEY)
+    fEY, rEY = extraer_resultados(bdata)
+    cases["EY"] = (fEY, rEY)
     corte_EY = sum(r[1] for r in rEY.values())
-    desp_EY = ops.nodeDisp(int(data["masters"]["piso4"]))[1]
-    print(f"\n[Caso EY] corte basal={corte_EY:.1f} kN vs {lateral_EY:.1f} kN "
-          f"| desp techo={desp_EY:.4f} m | sentido_ok={desp_EY >= 0}")
+    print(f"    [EY] corte={corte_EY:.1f} kN vs {lateral_EX:.1f} kN")
 
-    # ============ SUPERPOSICION R = lG*G + lQ*Q + lEX*EX + lEY*EY ============
     results = {}
-    for eid in data["elements"]:
+    for eid in bdata["elements"]:
         R = {}
         for compo in ["N_s", "Vy_s", "Mz_s"]:
-            val = (lambdas["G"] * casos["G"][0][eid][compo]
-                   + lambdas["Q"] * casos["Q"][0][eid][compo]
-                   + lambdas["EX"] * casos["EX"][0][eid][compo]
-                   + lambdas["EY"] * casos["EY"][0][eid][compo])
+            val = (lambdas["G"] * cases["G"][0][eid][compo]
+                   + lambdas["Q"] * cases["Q"][0][eid][compo]
+                   + lambdas["EX"] * cases["EX"][0][eid][compo]
+                   + lambdas["EY"] * cases["EY"][0][eid][compo])
             R[compo] = val
         results[eid] = {"N": [round(R["N_s"], 2), round(-R["N_s"], 2)],
                         "Vy": [round(R["Vy_s"], 2), round(-R["Vy_s"], 2)],
                         "Mz": [round(R["Mz_s"], 2), round(-R["Mz_s"], 2)]}
+    return results, ws
 
-    # ============ RESULTADO / ENVOLVENTE ============
-    resum = data["resumen"]
-    print("\n=== RESUMEN FINAL (por piso) ===")
-    for lvl in orden:
-        cols = sum(1 for ed in data["elements"].values()
-                   if ed["lvl"] == lvl and ed["type"] == "column")
-        vigas = sum(1 for ed in data["elements"].values()
-                    if ed["lvl"] == lvl and ed["type"] == "beam")
-        muros = sum(1 for ed in data["elements"].values()
-                    if ed["lvl"] == lvl and ed["type"] == "wall")
-        a = ws[lvl]["area_m2"]
-        print(f"  {lvl:7s} cols={cols:2d} vigas={vigas:2d} muros={muros:2d} | "
-              f"trib={a:6.1f} m2 | G={ws[lvl]['qG']*a:8.1f} "
-              f"Q={ws[lvl]['qQ']*a:7.1f} | W={ws[lvl]['W_kN']:8.1f} kN | corte_er={lateral_EX:.0f} kN")
 
-    print(f"\n--- Total edificio ---")
-    print(f"  nodos={resum['nodos']} columnas={resum['columnas']} "
-          f"vigas={resum['vigas']} muros={resum['muros']}")
-    print(f"  losa={resum['losa_area_m2']} m2 | G_losa={resum['carga_losa_G_kN']} "
-          f"Q={resum['carga_losa_Q_kN']} | PP={resum['peso_propio_kN']} kN")
-    print(f"  W_total={sum(v['W_kN'] for v in ws.values()):.1f} kN | "
-          f"V_basal_EX={lateral_EX:.1f} kN  V_basal_EY={lateral_EY:.1f} kN")
-    n_crit_rot = sum(1 for r in results.values()
-                     if abs(r["Mz"][0]) > 250.0)
-    print(f"  elementos con |Mz|>250 kN.m (revisar): {n_crit_rot}")
+def run_staged_analysis():
+    print("=== ANALISIS OPENSEES ED1 + ED2 (PASO 3) ===")
+    geom_path = "brain/geometry_stages.json"
+    if not os.path.exists(geom_path):
+        print("[ERROR] No se encontro 'brain/geometry_stages.json'.")
+        return
+    with open(geom_path, "r") as f:
+        data = json.load(f)
+    buildings = data["buildings"]
+    configs = {}
+    for bid, bdata in buildings.items():
+        cfg_path = bdata["config"]
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            configs[bid] = json.load(f)
 
-    # ============ EXPORTAR A UNITY ============
-    elements_out = {}
-    for eid, edata in data["elements"].items():
-        elements_out[eid] = edata
+    all_nodes = []
+    all_elements = []
+    all_results = []
+
+    for bid, bdata in buildings.items():
+        cfg = configs[bid]
+        print(f"\n=== {bid}: {cfg['nombre']} ===")
+        results, ws = analyze_building(bid, bdata, cfg)
+        r = bdata["resumen"]
+        print(f"  [QA] {bid}: nodos={r['nodos']} col={r['columnas']} "
+              f"vigas={r['vigas']} muros={r['muros']} losa={r['losa_area_m2']} m2")
+
+        for nid, nd in bdata["nodes"].items():
+            all_nodes.append({
+                "id": nid, "building": bid,
+                "x": nd["x"], "y": nd["y"], "z": nd["z"],
+                "floor": nd["floor"], "phase": nd["phase"],
+                "fix": nd.get("fix", [0] * 6),
+            })
+        for eid, ed in bdata["elements"].items():
+            all_elements.append({
+                "id": eid, "building": bid,
+                "type": ed["type"], "nodes": ed["nodes"],
+                "sectionTag": ed["sectionTag"], "cad_id": ed["cad_id"],
+                "phase": ed["phase"], "trib_area": ed["trib_area"],
+                "w_G": ed["w_G"], "w_Q": ed["w_Q"],
+                "length": ed["length"], "orient": ed["orient"], "lvl": ed["lvl"],
+            })
+        for eid, r in results.items():
+            all_results.append({
+                "id": eid, "building": bid,
+                "N": r["N"], "Vy": r["Vy"], "Mz": r["Mz"],
+            })
 
     pm_capacity = {
         "P": [11978.4, 9826.8, 4884.2, 0.0, -1649.3],
         "M": [0.0, 631.3, 1277.5, 513.2, 0.0],
     }
-    nodes_out = []
-    for nid, nd in data["nodes"].items():
-        nodes_out.append({
-            "id": nid, "x": nd["x"], "y": nd["y"], "z": nd["z"],
-            "floor": nd["floor"], "phase": nd["phase"], "fix": nd.get("fix", [0]*6),
-        })
-    elements_out = []
-    for eid, ed in data["elements"].items():
-        elements_out.append({
-            "id": eid, "type": ed["type"], "nodes": ed["nodes"],
-            "sectionTag": ed["sectionTag"], "cad_id": ed["cad_id"],
-            "phase": ed["phase"], "trib_area": ed["trib_area"],
-            "w_G": ed["w_G"], "w_Q": ed["w_Q"],
-            "length": ed["length"], "orient": ed["orient"], "lvl": ed["lvl"],
-        })
-    results_out = []
-    for eid, r in results.items():
-        results_out.append({"id": eid, "N": r["N"], "Vy": r["Vy"], "Mz": r["Mz"]})
     final_output = {
-        "nodes": nodes_out,
-        "elements": elements_out,
-        "results": results_out,
+        "nodes": all_nodes,
+        "elements": all_elements,
+        "results": all_results,
         "pm_capacity": pm_capacity,
     }
-
     unity_json_path = "visualization/Assets/StreamingAssets/structural_data.json"
     os.makedirs(os.path.dirname(unity_json_path), exist_ok=True)
     with open(unity_json_path, "w") as f:
         json.dump(final_output, f, indent=2)
 
-    print(f"\n[OK] Análisis OpenSeesPy completado.")
-    print(f"[OK] JSON exportado a Unity en: {unity_json_path}")
+    total_n = sum(b["resumen"]["nodos"] for b in buildings.values())
+    total_c = sum(b["resumen"]["columnas"] for b in buildings.values())
+    total_v = sum(b["resumen"]["vigas"] for b in buildings.values())
+    total_m = sum(b["resumen"]["muros"] for b in buildings.values())
+    print(f"\n=== TOTAL ED1+ED2 ===")
+    print(f"  nodos={total_n} col={total_c} vigas={total_v} muros={total_m}")
+    print(f"  elementos exportados: {len(all_elements)}")
+    print(f"\n[OK] JSON exportado a: {unity_json_path}")
     print("\n-------------------------------------------")
-    print(">>> RESULTADO: PASO 3 COMPLETADO CON ÉXITO <<<")
+    print(">>> RESULTADO: PASO 3 COMPLETADO CON EXITO <<<")
     print("-------------------------------------------")
 
 

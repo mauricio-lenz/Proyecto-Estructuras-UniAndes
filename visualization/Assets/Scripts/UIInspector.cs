@@ -66,7 +66,9 @@ public class UIInspector : MonoBehaviour {
         string tipo = element.elementType == "column" ? "COLUMNA"
                     : element.elementType == "wall" ? "MURO" : "VIGA";
 
-        string info  = $"TAG: {element.elementTag}\n";
+        string buildingLabel = string.IsNullOrEmpty(element.building) ? "" : element.building + "";
+        string info  = $"EDIFICIO: {buildingLabel}\n";
+        info        += $"TAG: {element.elementTag}\n";
         info        += $"NOMBRE: {element.cadID}\n";
         info        += $"TIPO: {tipo}  |  SECCION: {element.sectionTag}\n";
         info        += $"NIVEL: {element.lvl}  |  FASE: {element.phase}\n";

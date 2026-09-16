@@ -137,6 +137,7 @@ public class StructuralLoader : MonoBehaviour {
 
             ElementMono mono = go.AddComponent<ElementMono>();
             mono.elementTag = int.Parse(ed.id);
+            mono.building = ed.building;
             mono.elementType = ed.type;
             mono.cadID = ed.cad_id;
             mono.sectionTag = ed.sectionTag;

@@ -22,14 +22,17 @@ public class AutoSceneBuilder {
 
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        // 1. Cámara y Luz (apuntando al centro del edificio ED2)
-        //    Edificio: x [11.1, 42.35], y [10.93, 27.08], z [-7.97, 11.83]
-        Vector3 edCenter = new Vector3( (11.1f+42.35f)/2f, ((27.08f+10.93f)/2f), ((11.83f-7.97f)/2f) );
-        Vector3 lookAt = new Vector3(edCenter.x, edCenter.z, edCenter.y);  // Unity (x, z, y)
+        // 1. Cámara y Luz (apuntando al centro de ED1+ED2 juntos)
+        //    Unity: x = plan x, y = elev (model z), z = plan y
+        //    ED1: plan x [8.932, 53.932], elev [0, 19.8], plan y [62.88, 79.031]
+        //    ED2: plan x [11.1, 42.35],  elev [-7.97, 11.83], plan y [10.93, 27.08]
+        Vector3 edCenter = new Vector3((8.932f + 53.932f) / 2f, (19.8f - 7.97f) / 2f, (10.93f + 79.031f) / 2f);
+        Vector3 lookAt = edCenter;
         GameObject camObj = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
         camObj.tag = "MainCamera";
-        camObj.transform.position = new Vector3(80, 55, -55);
-        camObj.transform.LookAt(lookAt + new Vector3(0, 5, 0));
+        camObj.transform.position = new Vector3(edCenter.x - 40f, 85f, edCenter.z + 70f);
+        camObj.transform.LookAt(lookAt);
+        camObj.GetComponent<Camera>().farClipPlane = 2000f;
 
         GameObject lightObj = new GameObject("Directional Light", typeof(Light));
         Light light = lightObj.GetComponent<Light>();
@@ -83,7 +86,7 @@ public class AutoSceneBuilder {
         rtLeg.pivot = new Vector2(1, 1);
         rtLeg.anchoredPosition = new Vector2(-20, -20);
         rtLeg.sizeDelta = new Vector2(220, 80);
-        txtLeg.text = "AZUL: columna\nNARANJA: viga\nVERDE: muro\nClaro: fase 1  Oscuro: fase 2";
+        txtLeg.text = "ED1 + ED2 (2024_22 + 2017_67)\nAZUL: columna\nNARANJA: viga\nVERDE: muro\nClaro: fase 1  Oscuro: fase 2";
 
         // 3. Manager Estructural
         GameObject manager = new GameObject("StructuralManager", typeof(StructuralLoader), typeof(UIInspector));

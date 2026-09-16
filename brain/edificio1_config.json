@@ -1,0 +1,53 @@
+{
+  "id": "ED1",
+  "nombre": "Edificio 1 - 2017_67",
+  "proyecto": "2017_67",
+  "material": "H30",
+  "gamma": 25.0,
+  "grilla_X": [
+    { "eje": "E", "x": 8.932 },
+    { "eje": "F", "x": 18.932 },
+    { "eje": "G", "x": 28.932 },
+    { "eje": "H", "x": 38.932 },
+    { "eje": "I", "x": 48.932 },
+    { "eje": "I'", "x": 53.932 }
+  ],
+  "grilla_Y": [
+    { "eje": "3", "y": 62.880 },
+    { "eje": "2", "y": 70.131 },
+    { "eje": "1", "y": 79.031 }
+  ],
+  "niveles": [
+    { "id": "base", "elevation": 0.0, "qG": null, "qQ": null, "phase": 1 },
+    { "id": "Subterraneo", "elevation": 3.96, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "Piso1", "elevation": 7.92, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "Piso2", "elevation": 11.88, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "Piso3", "elevation": 15.84, "qG": 5.25, "qQ": 2.942, "phase": 2 },
+    { "id": "Piso4", "elevation": 19.80, "qG": 4.25, "qQ": 2.942, "phase": 2 }
+  ],
+  "niveles_losa": ["Subterraneo", "Piso1", "Piso2", "Piso3", "Piso4"],
+  "seccion_columna": "P-70x70",
+  "seccion_viga": "V-60x80",
+  "seccion_viga_secundaria": "V-45x30",
+  "seccion_viga_borde": "V-40x80",
+  "seccion_muro": "M-20",
+  "muros_e": 0.20,
+  "muros_ejes": [
+    { "direccion": "Y", "eje": "F" },
+    { "direccion": "X", "eje": "2" }
+  ],
+  "columnas_cruces": "all",
+  "losa_e": 0.15,
+  "voladizos": [
+    { "id": "VOL-ESTE", "nivel": "Piso3", "x_min": 53.932, "x_max": 58.932, "y_min": 62.880, "y_max": 79.031 },
+    { "id": "VOL-ESTE", "nivel": "Piso4", "x_min": 53.932, "x_max": 58.932, "y_min": 62.880, "y_max": 79.031 }
+  ],
+  "cargas": {
+    "g": 9.81,
+    "sismo": {
+      "fraccion_g": 0.20,
+      "fraccion_sobrecarga_masa": 0.50
+    },
+    "superposicion_lambdas": { "G": 1.0, "Q": 1.0, "EX": 0.9, "EY": 0.75 }
+  }
+}

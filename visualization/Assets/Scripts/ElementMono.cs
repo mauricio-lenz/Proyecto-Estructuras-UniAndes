@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class ElementMono : MonoBehaviour {
     public int elementTag;
+    public string building;
     public string elementType;
     public string cadID;
     public string sectionTag;

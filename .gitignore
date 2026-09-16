@@ -10,8 +10,6 @@ visualization/Logs/
 visualization/Temp/
 visualization/Obj/
 visualization/UserSettings/
-visualization/Packages/
-visualization/ProjectSettings/
 visualization/*.csproj
 visualization/*.sln
 

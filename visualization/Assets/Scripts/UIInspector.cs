@@ -23,8 +23,7 @@ public class UIInspector : MonoBehaviour {
     private Texture2D pmTex;
     private Texture2D diagTex;
 
-    private Rect winRect = new Rect(16f, 16f, 620f, 520f);
-    private Vector2 scrollPos;
+    private Rect winRect = new Rect(16f, 16f, 660f, 580f);
     private string lastUICase = "__init__";
 
     private GUIStyle stHeader;
@@ -117,8 +116,11 @@ public class UIInspector : MonoBehaviour {
 
     void OnGUI() {
         if (!panelVisible) return;
+        // Ventana panoramica pero nunca mayor que la pantalla: se puede seguir
+        // interactuando con la escena fuera de ella. La rueda del raton fuera del
+        // panel hace zoom (el panel NO tiene scroll para no robar la rueda).
         float w = Mathf.Clamp(Screen.width - 16f, 400f, 660f);
-        float h = Mathf.Clamp(Screen.height - 36f, 380f, 560f);
+        float h = Mathf.Clamp(Screen.height - 24f, 400f, 580f);
         winRect.width = w;
         winRect.height = h;
         winRect.x = Mathf.Clamp(winRect.x, 0f, Mathf.Max(0f, Screen.width - w));
@@ -127,15 +129,7 @@ public class UIInspector : MonoBehaviour {
     }
 
     void WindowFunc(int id) {
-        GUI.DragWindow(new Rect(0f, 0f, winRect.width, 26f));
-        GUILayout.Space(6f);
-
-        // Contenido con scroll para que la ventana quepa siempre en el viewport
-        // y nunca cubra toda la pantalla (la interaccion con la escena queda libre).
-        scrollPos = GUILayout.BeginScrollView(scrollPos,
-            GUILayout.Width(winRect.width - 16f),
-            GUILayout.Height(winRect.height - 36f));
-
+        GUI.DragWindow(new Rect(0f, 0f, winRect.width, 24f));
         if (selectedSlab != null) {
             DrawSlabInfo();
         } else if (selected == null) {
@@ -143,19 +137,36 @@ public class UIInspector : MonoBehaviour {
         } else {
             DrawElementInfo();
         }
+        GUILayout.Space(6f);
+        DrawFooter();
+    }
 
-        GUILayout.Space(10f);
-        GUILayout.EndScrollView();
+    void DrawFooter() {
+        GUILayout.Space(2f);
+        var footStyle = new GUIStyle(stLabel);
+        footStyle.fontSize = 14;
+        var hintStyle = new GUIStyle(stLabel);
+        hintStyle.fontSize = 13;
+        hintStyle.normal.textColor = new Color(0.35f, 0.35f, 0.42f, 1f);
+        GUILayout.Label("Click: seleccionar · L: losas · D/M/N: diagramas · C: caso · F: encuadrar · P: ocultar", footStyle);
+        GUILayout.Label("Der: rotar · Rueda: zoom (panel no roba la rueda) · Arrastre esta barra para reubicar el panel", hintStyle);
     }
 
     void DrawPlaceholder() {
-        GUILayout.Space(40f);
+        GUILayout.Space(30f);
         GUILayout.Label("Seleccione un elemento de la estructura (clic izquierdo).", stBold);
-        GUILayout.Space(6f);
+        GUILayout.Space(4f);
         GUILayout.Label("Tambien puede seleccionar losas y voladizos con la tecla L.", stLabel);
-        GUILayout.Space(12f);
-        GUILayout.Label("Teclas: D deformada · M momentos · N axial · C cambiar caso · F encuadrar", stLabel);
-        GUILayout.Label("Ventana arrastrable por su titulo. Cierra con P.", stLabel);
+        GUILayout.Space(10f);
+        DrawFooterNotes();
+    }
+
+    void DrawFooterNotes() {
+        var hintStyle = new GUIStyle(stLabel);
+        hintStyle.fontSize = 13;
+        hintStyle.normal.textColor = new Color(0.35f, 0.35f, 0.42f, 1f);
+        GUILayout.Label("Teclas: D deformada · M momentos · N axial · C cambiar caso · F encuadrar", hintStyle);
+        GUILayout.Label("Der: rotar · Rueda: zoom · Clic medio: pan · P: ocultar panel", hintStyle);
     }
 
     void DrawElementInfo() {
@@ -169,26 +180,13 @@ public class UIInspector : MonoBehaviour {
                     : selected.elementType == "wall" ? "MURO" : "VIGA";
 
         GUILayout.Label($"{selected.building}  ·  {tipo}  ·  TAG {selected.elementTag}", stHeader);
+        GUILayout.Label($"CAD {selected.cadID} · Sec {selected.sectionTag} · Mat {selected.material} · Nivel {selected.lvl} · Largo {selected.length:F2} m · Nodos {Nodelist(selected)}", stLabel);
         GUILayout.Space(2f);
-        GUILayout.Label($"Caso activo: {caso}", stSection);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"CAD: {selected.cadID}", stLabel);
-        GUILayout.Label($"Seccion: {selected.sectionTag}   Material: {selected.material}", stLabel);
-        GUILayout.EndHorizontal();
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"Nivel: {selected.lvl}   Fase: {selected.phase}   Largo: {selected.length:F2} m   Orient: {selected.orient}", stLabel);
-        GUILayout.EndHorizontal();
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"Nodos: {Nodelist(selected)}   Restricciones: {fixStr()}", stLabel);
-        GUILayout.EndHorizontal();
-        GUILayout.Space(4f);
 
         DrawSection("CARGAS GRAVITATORIAS");
         Row2("Area tributaria", $"{selected.tribArea:F2} m2");
-        Row2("w_G (por metro)", $"{selected.wG:F3} kN/m");
-        Row2("w_Q (por metro)", $"{selected.wQ:F3} kN/m");
-        Row2("G = w_G x L", $"{selected.wG * selected.length:F2} kN");
-        Row2("Q = w_Q x L", $"{selected.wQ * selected.length:F2} kN");
+        Row2("wG · wQ · G · Q",
+             $"{selected.wG:F3} kN/m · {selected.wQ:F3} kN/m · G {selected.wG * selected.length:F2} kN · Q {selected.wQ * selected.length:F2} kN");
         GUILayout.Space(2f);
 
         DrawSection($"FUERZAS INTERNAS  [{caso}]");
@@ -203,70 +201,56 @@ public class UIInspector : MonoBehaviour {
         DrawSection("DEMANDA / CAPACIDAD (P-M)");
         float dP = DemandP(selected);
         float dM = DemandM(selected);
-        Row2("P (compresion +)", $"{dP:F2} kN");
-        Row2("M (flexion)", $"{dM:F2} kN-m");
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"P {dP:F2} kN · M {dM:F2} kN-m", stLabel);
         float mcap;
         float dc = ComputeDC(selected, dP, dM, out mcap);
         if (!float.IsNaN(dc)) {
-            Row2("M capacidad en P", $"{mcap:F2} kN-m");
-            GUILayout.Space(2f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("D/C = M_dem / M_cap", stBold);
             bool ok = dc <= 1f;
             var boxStyle = new GUIStyle(GUI.skin.box);
-            boxStyle.fontSize = 17;
+            boxStyle.fontSize = 15;
             boxStyle.fontStyle = FontStyle.Bold;
             boxStyle.alignment = TextAnchor.MiddleCenter;
             boxStyle.normal.textColor = Color.white;
             boxStyle.normal.background = MakeTex(1, 1, ok ? new Color(0.15f, 0.55f, 0.20f, 1f)
                                                           : new Color(0.75f, 0.15f, 0.15f, 1f));
-            GUILayout.Box($"  {dc:F3}   {(ok ? "OK" : "EXCEDE")}  ", boxStyle, GUILayout.Width(190f));
-            GUILayout.EndHorizontal();
+            GUILayout.Space(10f);
+            GUILayout.Box($"D/C {dc:F3}  ·  Mcap {mcap:F2}  {(ok ? "OK" : "EXCEDE")}", boxStyle, GUILayout.Width(250f));
         } else {
             Row2("D/C", "N/A (viga: revisar Mz envolvente)");
         }
-        GUILayout.Space(6f);
+        GUILayout.EndHorizontal();
+        GUILayout.Space(4f);
 
         // Graficos: diagramas de fuerzas (izquierda) y curva P-M (derecha).
         EnsureTextures();
         GUILayout.BeginHorizontal();
         if (diagTex != null) {
-            var rd = GUILayoutUtility.GetRect(280f, 220f);
+            var rd = GUILayoutUtility.GetRect(300f, 150f);
             GUI.DrawTexture(rd, diagTex, ScaleMode.ScaleToFit);
         }
         if (pmTex != null) {
-            var rp = GUILayoutUtility.GetRect(280f, 220f);
+            var rp = GUILayoutUtility.GetRect(300f, 150f);
             GUI.DrawTexture(rp, pmTex, ScaleMode.ScaleToFit);
         }
         GUILayout.EndHorizontal();
-        GUILayout.Space(8f);
-        GUILayout.Label("Click: seleccionar · L: losas · D/M/N: diagramas · F: encuadrar", stLabel);
     }
 
     void DrawSlabInfo() {
         string kind = selectedSlab.isVoladizo ? "VOLADIZO" : "LOSA";
         GUILayout.Label($"{selectedSlab.building}  ·  {kind}  ·  {selectedSlab.id}", stHeader);
-        GUILayout.Space(2f);
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Nivel: " + selectedSlab.lvl, stLabel);
-        GUILayout.Label("Espesor: " + selectedSlab.thickness.ToString("F2") + " m", stLabel);
+        GUILayout.Label($"Nivel {selectedSlab.lvl} · Espesor {selectedSlab.thickness.ToString("F2")} m · Area {selectedSlab.area.ToString("F2")} m2", stLabel);
         GUILayout.EndHorizontal();
-        GUILayout.Space(4f);
+        GUILayout.Space(2f);
 
         DrawSection("CARGAS DE LA LOSA");
-        Row2("Area", selectedSlab.area.ToString("F2") + " m2");
         Row2("qG (permanente)", selectedSlab.qG.ToString("F3") + " kPa");
         Row2("qQ (sobrecarga)", selectedSlab.qQ.ToString("F3") + " kPa");
-        Row2("G = qG x A", (selectedSlab.qG * selectedSlab.area).ToString("F1") + " kN");
-        Row2("Q = qQ x A", (selectedSlab.qQ * selectedSlab.area).ToString("F1") + " kN");
+        Row2("G = qG·A · Q = qQ·A", (selectedSlab.qG * selectedSlab.area).ToString("F1") + " kN  ·  "
+                                   + (selectedSlab.qQ * selectedSlab.area).ToString("F1") + " kN");
         GUILayout.Space(4f);
-        var wrap = new GUIStyle(stLabel);
-        wrap.wordWrap = true;
-        GUILayout.Box("La losa contribuye a los pesos sismicos W y transmite sus cargas " +
-                      "a vigas y columnas. No aplica curva P-M ni fuerzas internas.", wrap,
-                      GUILayout.ExpandWidth(true));
-        GUILayout.Space(8f);
-        GUILayout.Label("Click: seleccionar · L: losas · P: ocultar", stLabel);
+        GUILayout.Label("La losa contribuye a los pesos sismicos W y transmite cargas a vigas y columnas.", stLabel);
     }
 
     string case_display(string c) {

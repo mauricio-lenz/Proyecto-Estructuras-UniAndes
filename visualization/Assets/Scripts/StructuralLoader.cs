@@ -1,5 +1,4 @@
 using System.IO;
-using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -10,8 +9,14 @@ public class StructuralLoader : MonoBehaviour {
     public Material matColumnPhase2;
     public Material matBeamPhase2;
     public Material matWallPhase2;
+    public Material matSlab;
+    public Material matVol;
+    public Material matApoyo;
 
-    private StructuralDataset data;
+    public StructuralDataset data { get; private set; }
+    public Dictionary<string, NodeData> nodeById { get; private set; }
+    public Dictionary<string, ElementResult> resById { get; private set; }
+    public List<ElementMono> elementMonos { get; private set; }
 
     void Start() {
         string jsonPath = Path.Combine(Application.streamingAssetsPath, "structural_data.json");
@@ -19,98 +24,111 @@ public class StructuralLoader : MonoBehaviour {
     }
 
     Vector3 ModelToWorld(float x, float y, float z) {
-        // Modelo: x,y en planta, z = elevacion. Unity: x,z'=elev,y'=plan
         return new Vector3(x, z, y);
+    }
+
+    Material MakeMaterial(Color c) {
+        var m = new Material(Shader.Find("Standard"));
+        if (m == null || m.shader == null)
+            m = new Material(Shader.Find("Legacy Shaders/Diffuse"));
+        m.color = c;
+        return m;
+    }
+
+    Material MakeTransparent(Color c, float alpha) {
+        var m = MakeMaterial(new Color(c.r, c.g, c.b, alpha));
+        m.SetFloat("_Mode", 3);
+        m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetInt("_ZWrite", 0);
+        m.DisableKeyword("_ALPHATEST_ON");
+        m.EnableKeyword("_ALPHABLEND_ON");
+        m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        m.renderQueue = 3000;
+        m.color = new Color(c.r, c.g, c.b, alpha);
+        return m;
     }
 
     Material MaterialFor(string type, int phase) {
         bool p2 = phase >= 2;
         if (type == "column") return p2 ? matColumnPhase2 : matColumn;
-        if (type == "wall") return p2 ? matWallPhase2 : matWall;
+        if (type == "wall")   return p2 ? matWallPhase2 : matWall;
         return p2 ? matBeamPhase2 : matBeam;
     }
 
     void EnsureMaterials() {
-        matColumn = MakeMaterial(new Color(0.2f, 0.5f, 1f, 1f));      // azul
-        matBeam = MakeMaterial(new Color(1f, 0.55f, 0.1f, 1f));       // naranja
-        matWall = MakeMaterial(new Color(0.2f, 0.8f, 0.5f, 1f));      // verde
+        matColumn = MakeMaterial(new Color(0.2f, 0.5f, 1f, 1f));
+        matBeam   = MakeMaterial(new Color(1f, 0.55f, 0.1f, 1f));
+        matWall   = MakeMaterial(new Color(0.2f, 0.8f, 0.5f, 1f));
         matColumnPhase2 = MakeMaterial(new Color(0.1f, 0.3f, 0.7f, 1f));
-        matBeamPhase2 = MakeMaterial(new Color(0.7f, 0.35f, 0.05f, 1f));
-        matWallPhase2 = MakeMaterial(new Color(0.1f, 0.5f, 0.3f, 1f));
-    }
-
-    Material MakeMaterial(Color c) {
-        var m = new Material(Shader.Find("Standard"));
-        if (m == null || m.shader == null) m = new Material(Shader.Find("Legacy Shaders/Diffuse"));
-        m.color = c;
-        return m;
+        matBeamPhase2   = MakeMaterial(new Color(0.7f, 0.35f, 0.05f, 1f));
+        matWallPhase2   = MakeMaterial(new Color(0.1f, 0.5f, 0.3f, 1f));
+        matSlab  = MakeTransparent(new Color(0.6f, 0.6f, 0.65f), 0.25f);
+        matVol   = MakeTransparent(new Color(0.86f, 0.71f, 0.2f), 0.35f);
+        matApoyo = MakeMaterial(new Color(0.1f, 0.6f, 0.2f, 1f));
     }
 
     GameObject CreateBox(Vector3 start, Vector3 end, Material mat, Vector3 section) {
         Vector3 dir = end - start;
         float len = dir.magnitude;
-        if (len < 1e-6) return null;
-        GameObject obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        if (len < 1e-6f) return null;
+        var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
         obj.name = "element";
         obj.transform.position = (start + end) / 2f;
         obj.transform.localScale = new Vector3(len, section.y, section.x);
         obj.transform.rotation = Quaternion.FromToRotation(Vector3.right, dir.normalized);
         obj.GetComponent<Collider>().enabled = true;
-        SetMaterial(obj, mat);
+        obj.GetComponent<Renderer>().sharedMaterial = mat;
         return obj;
     }
 
     GameObject CreateColumn(Vector3 start, Vector3 end, Material mat, float dia) {
         Vector3 dir = end - start;
         float len = dir.magnitude;
-        if (len < 1e-6) return null;
-        GameObject obj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        if (len < 1e-6f) return null;
+        var obj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         obj.name = "element";
         obj.transform.position = (start + end) / 2f;
         obj.transform.localScale = new Vector3(dia, len / 2f, dia);
         obj.transform.rotation = Quaternion.FromToRotation(Vector3.up, dir.normalized);
         obj.GetComponent<Collider>().enabled = true;
-        SetMaterial(obj, mat);
+        obj.GetComponent<Renderer>().sharedMaterial = mat;
         return obj;
-    }
-
-    void SetMaterial(GameObject obj, Material mat) {
-        var r = obj.GetComponent<Renderer>();
-        if (r != null && mat != null) r.sharedMaterial = mat;
     }
 
     void BuildStructureFromJSON(string jsonPath) {
         if (!File.Exists(jsonPath)) {
-            Debug.LogError($"[ERROR] No se encontró el JSON en: {jsonPath}");
+            Debug.LogError($"[ERROR] No se encontro JSON: {jsonPath}");
             return;
         }
-        Debug.Log("[OK] Cargando structural_data.json...");
         data = JsonUtility.FromJson<StructuralDataset>(File.ReadAllText(jsonPath));
         if (data?.elements == null) {
-            Debug.LogError("[ERROR] JSON inválido o vacío (elements nulo).");
+            Debug.LogError("[ERROR] JSON invalido.");
             return;
         }
 
         EnsureMaterials();
-
-        // Índice de nodos y resultados por id
-        var nodeById = new Dictionary<string, NodeData>();
+        nodeById = new Dictionary<string, NodeData>();
         foreach (var nd in data.nodes) nodeById[nd.id] = nd;
-        var resById = new Dictionary<string, ElementResult>();
+        resById = new Dictionary<string, ElementResult>();
         foreach (var r in data.results) resById[r.id] = r;
 
+        elementMonos = new List<ElementMono>();
         GameObject parent = new GameObject("Estructura");
-        GameObject baseGroup = new GameObject("Apoyos");
-        baseGroup.transform.SetParent(parent.transform, false);
-        Material matApoyo = MakeMaterial(new Color(0.2f, 0.2f, 0.2f, 1f));
-        foreach (NodeData nd in data.nodes) {
+        GameObject losasGroup = new GameObject("Losas");
+        losasGroup.transform.SetParent(parent.transform, false);
+        GameObject volGroup = new GameObject("Voladizos");
+        volGroup.transform.SetParent(parent.transform, false);
+
+        Material matApoyoObj = matApoyo;
+        foreach (var nd in data.nodes) {
             if (nd.fix == null || nd.fix.Count < 1 || nd.fix[0] != 1) continue;
-            GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            var s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             s.name = "APOYO-" + nd.id;
             s.transform.position = ModelToWorld(nd.x, nd.y, nd.z);
             s.transform.localScale = Vector3.one * 0.8f;
-            s.transform.SetParent(baseGroup.transform, false);
-            SetMaterial(s, matApoyo);
+            s.GetComponent<Renderer>().sharedMaterial = matApoyoObj;
+            s.transform.SetParent(parent.transform, false);
         }
 
         foreach (var ed in data.elements) {
@@ -123,24 +141,24 @@ public class StructuralLoader : MonoBehaviour {
             Material mat = MaterialFor(ed.type, ed.phase);
 
             GameObject go;
-            if (ed.type == "column") {
+            if (ed.type == "column")
                 go = CreateColumn(p1, p2, mat, 0.7f);
-            } else if (ed.type == "wall") {
+            else if (ed.type == "wall")
                 go = CreateBox(p1, p2, mat, new Vector3(0.2f, 1.0f, 0.2f));
-            } else {
+            else
                 go = CreateBox(p1, p2, mat, new Vector3(0.6f, 0.8f, 0.8f));
-            }
             if (go == null) continue;
 
             go.transform.SetParent(parent.transform, true);
-            go.name = LoaderNameFromCad(ed.cad_id, ed.id);
+            go.name = string.IsNullOrEmpty(ed.cad_id) ? "ELEM-" + ed.id : ed.cad_id;
 
-            ElementMono mono = go.AddComponent<ElementMono>();
+            var mono = go.AddComponent<ElementMono>();
             mono.elementTag = int.Parse(ed.id);
             mono.building = ed.building;
             mono.elementType = ed.type;
             mono.cadID = ed.cad_id;
             mono.sectionTag = ed.sectionTag;
+            mono.material = ed.material;
             mono.floor = n1.floor;
             mono.lvl = ed.lvl;
             mono.orient = ed.orient;
@@ -149,19 +167,87 @@ public class StructuralLoader : MonoBehaviour {
             mono.wG = ed.w_G;
             mono.wQ = ed.w_Q;
             mono.length = ed.length;
+            mono.nodeIds = ed.nodes;
+            mono.worldStart = p1;
+            mono.worldEnd = p2;
+
+            if (ed.local != null && ed.local.Count >= 9) {
+                mono.localL1 = new Vector3(ed.local[0], ed.local[2], ed.local[1]);
+                mono.localL2 = new Vector3(ed.local[3], ed.local[5], ed.local[4]);
+                mono.localL3 = new Vector3(ed.local[6], ed.local[8], ed.local[7]);
+            }
 
             if (resById.TryGetValue(ed.id, out var rr)) {
-                mono.N = rr.N;
-                mono.Vy = rr.Vy;
-                mono.Mz = rr.Mz;
+                mono.N  = rr.N;  mono.Vy = rr.Vy; mono.Mz = rr.Mz;
+                mono.T  = rr.T;  mono.My = rr.My; mono.Vz = rr.Vz;
+                mono.demandP = rr.P;
+                mono.demandM = rr.M;
+            }
+            elementMonos.Add(mono);
+        }
+
+        if (data.slabs != null) {
+            foreach (var s in data.slabs) {
+                Vector3 center = SlabCenter(s);
+                float dx = SlabRange(s.x);
+                float dy = SlabRange(s.y);
+                var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = $"Losas-{s.lvl}-{s.building}";
+                go.transform.localScale = new Vector3(dx, s.e, dy);
+                go.transform.position = ModelToWorld(center.x, center.y, s.z + s.e / 2f);
+                go.GetComponent<Collider>().enabled = false;
+                go.GetComponent<Renderer>().sharedMaterial = matSlab;
+                go.transform.SetParent(losasGroup.transform, false);
             }
         }
 
-        Debug.Log($"[OK] Estructura construida: {data.elements.Count} elementos, "
-                  + $"{data.nodes.Count} nodos.");
+        if (data.voladizos != null) {
+            foreach (var v in data.voladizos) {
+                Vector3 center = VolCenter(v);
+                float dx = VolRangeX(v);
+                float dy = VolRangeY(v);
+                var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = v.id;
+                go.transform.localScale = new Vector3(dx, v.e, dy);
+                go.transform.position = ModelToWorld(center.x, center.y, v.z + v.e / 2f);
+                go.GetComponent<Collider>().enabled = false;
+                go.GetComponent<Renderer>().sharedMaterial = matVol;
+                go.transform.SetParent(volGroup.transform, false);
+            }
+        }
+
+        Debug.Log($"[OK] Estructura: {data.elements.Count} elem, {data.nodes.Count} nodos, "
+                  + $"{(data.slabs != null ? data.slabs.Count : 0)} losas, "
+                  + $"{(data.voladizos != null ? data.voladizos.Count : 0)} voladizos.");
     }
 
-    string LoaderNameFromCad(string cad, string id) {
-        return string.IsNullOrEmpty(cad) ? "ELEM-" + id : cad;
+    static Vector3 SlabCenter(SlabData s) {
+        float cx = (s.x[0] + s.x[1] + s.x[2] + s.x[3]) / 4f;
+        float cy = (s.y[0] + s.y[1] + s.y[2] + s.y[3]) / 4f;
+        return new Vector3(cx, cy, 0f);
+    }
+
+    static float SlabRange(List<float> vals) {
+        float mn = float.MaxValue, mx = float.MinValue;
+        foreach (float v in vals) { if (v < mn) mn = v; if (v > mx) mx = v; }
+        return mx - mn;
+    }
+
+    static Vector3 VolCenter(VoladizoData v) {
+        float cx = (v.x[0] + v.x[1] + v.x[2] + v.x[3]) / 4f;
+        float cy = (v.y[0] + v.y[1] + v.y[2] + v.y[3]) / 4f;
+        return new Vector3(cx, cy, 0f);
+    }
+
+    static float VolRangeX(VoladizoData v) {
+        float mn = float.MaxValue, mx = float.MinValue;
+        foreach (float vx in v.x) { if (vx < mn) mn = vx; if (vx > mx) mx = vx; }
+        return mx - mn;
+    }
+
+    static float VolRangeY(VoladizoData v) {
+        float mn = float.MaxValue, mx = float.MinValue;
+        foreach (float vy in v.y) { if (vy < mn) mn = vy; if (vy > mx) mx = vy; }
+        return mx - mn;
     }
 }

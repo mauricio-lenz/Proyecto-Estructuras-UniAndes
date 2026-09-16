@@ -137,18 +137,30 @@ def configurar_y_analizar():
 
 
 def extraer_resultados(data):
+    """Fuerzas de extremo (6 componentes) en convencion basic force.
+
+    Orden documentado de basicForce para elasticBeamColumn 3D:
+    [N, Vy, Mz, T, My, Vz] (axial, corte local y, flexion local z, torsion,
+    flexion local y, corte local z). Los arrays de cada componente se
+    guardan como [extremo_i, extremo_j] = [v, -v] por simetria (igual a
+    versiones anteriores validadas).
+    """
     fuerzas = {}
     for eid in data["elements"]:
-        f = ops.basicForce(int(eid))
+        b = ops.basicForce(int(eid))
         fuerzas[eid] = {
-            "N": [f[0], -f[0]], "Vy": [f[1], -f[1]], "Mz": [f[2], -f[2]],
-            "N_s": f[0], "Vy_s": f[1], "Mz_s": f[2],
+            "N": [b[0], -b[0]], "Vy": [b[1], -b[1]], "Mz": [b[2], -b[2]],
+            "T": [b[3], -b[3]], "My": [b[4], -b[4]], "Vz": [b[5], -b[5]],
+            "N_s": b[0], "Vy_s": b[1], "Mz_s": b[2],
+            "T_s": b[3], "My_s": b[4], "Vz_s": b[5],
         }
     reac = {}
+    desp = {}
     for nid, ndata in data["nodes"].items():
+        desp[nid] = list(ops.nodeDisp(int(nid)))
         if ndata.get("fix") and ndata["fix"][0] == 1:
             reac[nid] = ops.nodeReaction(int(nid))
-    return fuerzas, reac
+    return fuerzas, reac, desp
 
 
 def analyze_building(bid, bdata, cfg):
@@ -172,45 +184,70 @@ def analyze_building(bid, bdata, cfg):
     construir_modelo(bdata)
     aplicar_gravedad(bdata, "G")
     configurar_y_analizar()
-    fG, rG = extraer_resultados(bdata)
-    cases["G"] = (fG, rG)
+    fG, rG, dG = extraer_resultados(bdata)
+    cases["G"] = (fG, rG, dG)
     print(f"    [G] OK reacciones Fz={sum(r[2] for r in rG.values()):.1f} kN")
 
     construir_modelo(bdata)
     aplicar_gravedad(bdata, "Q")
     configurar_y_analizar()
-    fQ, rQ = extraer_resultados(bdata)
-    cases["Q"] = (fQ, rQ)
+    fQ, rQ, dQ = extraer_resultados(bdata)
+    cases["Q"] = (fQ, rQ, dQ)
 
     construir_modelo(bdata)
     aplicar_sismo(bdata, "EX", fuerzas_EX)
     configurar_y_analizar()
-    fEX, rEX = extraer_resultados(bdata)
-    cases["EX"] = (fEX, rEX)
+    fEX, rEX, dEX = extraer_resultados(bdata)
+    cases["EX"] = (fEX, rEX, dEX)
     corte_EX = sum(r[0] for r in rEX.values())
     print(f"    [EX] corte={corte_EX:.1f} kN vs {lateral_EX:.1f} kN")
 
     construir_modelo(bdata)
     aplicar_sismo(bdata, "EY", fuerzas_EY)
     configurar_y_analizar()
-    fEY, rEY = extraer_resultados(bdata)
-    cases["EY"] = (fEY, rEY)
+    fEY, rEY, dEY = extraer_resultados(bdata)
+    cases["EY"] = (fEY, rEY, dEY)
     corte_EY = sum(r[1] for r in rEY.values())
     print(f"    [EY] corte={corte_EY:.1f} kN vs {lateral_EX:.1f} kN")
+
+    combo = ["G", "Q", "EX", "EY"]
+    comps = ["N", "Vy", "Mz", "T", "My", "Vz"]
+
+    def superp(field, eid, comp=None):
+        if comp is None:
+            return sum(lambdas[c] * cases[c][0][eid][field] for c in combo)
+        vals = [cases[c][0][eid][field][comp] for c in combo]
+        return sum(lambdas[c] * v for c, v in zip(combo, vals))
 
     results = {}
     for eid in bdata["elements"]:
         R = {}
-        for compo in ["N_s", "Vy_s", "Mz_s"]:
-            val = (lambdas["G"] * cases["G"][0][eid][compo]
-                   + lambdas["Q"] * cases["Q"][0][eid][compo]
-                   + lambdas["EX"] * cases["EX"][0][eid][compo]
-                   + lambdas["EY"] * cases["EY"][0][eid][compo])
-            R[compo] = val
-        results[eid] = {"N": [round(R["N_s"], 2), round(-R["N_s"], 2)],
-                        "Vy": [round(R["Vy_s"], 2), round(-R["Vy_s"], 2)],
-                        "Mz": [round(R["Mz_s"], 2), round(-R["Mz_s"], 2)]}
-    return results, ws
+        for compo in comps:
+            R[compo] = [round(superp(compo + "_s", eid), 2),
+                        round(-superp(compo + "_s", eid), 2)]
+        results[eid] = R
+
+    # Desplazamientos nodales superpuestos (para la deformada Unity)
+    desplazamientos = {}
+    for nid in bdata["nodes"]:
+        d = [0.0, 0.0, 0.0]
+        for c in combo:
+            val = cases[c][2][nid]
+            d[0] += lambdas[c] * val[0]
+            d[1] += lambdas[c] * val[1]
+            d[2] += lambdas[c] * val[2]
+        desplazamientos[nid] = [round(v, 6) for v in d]
+
+    return results, ws, desplazamientos
+
+
+def build_combinacion_nombre(configs):
+    """Descripcion textual de la combinacion usada (de ED1, igual en ambas)."""
+    for cfg in configs.values():
+        lam = cfg.get("cargas", {}).get("superposicion_lambdas", {})
+        return "1.0G + 1.0Q + {:.2f}EX + {:.2f}EY".format(
+            lam.get("EX", 1.0), lam.get("EY", 1.0))
+    return "1.0G + 1.0Q + 0.9EX + 0.75EY"
 
 
 def run_staged_analysis():
@@ -231,23 +268,74 @@ def run_staged_analysis():
     all_nodes = []
     all_elements = []
     all_results = []
+    all_slabs = []
+    all_voladizos = []
+    all_apoyos = []
+
+    CAP_URL = "brain/cap_pm.json"
+    capstore = {}
+    if os.path.exists(CAP_URL):
+        with open(CAP_URL, "r", encoding="utf-8") as f:
+            capstore = json.load(f)
+    pm_capacity = []
+
+    def add_pm(sec, curve):
+        for entry in pm_capacity:
+            if entry["section"] == sec:
+                return
+        pm_capacity.append({"section": sec, "P": curve["P"], "M": curve["M"]})
+
+    def local_axes(n1, n2):
+        """Ejes locales del elemento: L1 a lo largo, L2/L3 perpendiculares
+        (convencion igual a la del viewer; en coords de modelo OS)."""
+        dx = n2["x"] - n1["x"]; dy = n2["y"] - n1["y"]; dz = n2["z"] - n1["z"]
+        L = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if L < 1e-12:
+            return [0, 0, 1, 0, 1, 0, 1, 0, 0]
+        l1 = [dx / L, dy / L, dz / L]
+        if abs(l1[2]) > 0.99:  # vertical -> L2 en X
+            cand = [1.0, 0.0, 0.0]
+            dot = cand[0] * l1[0] + cand[1] * l1[1] + cand[2] * l1[2]
+            l2 = [cand[0] - dot * l1[0], cand[1] - dot * l1[1],
+                  cand[2] - dot * l1[2]]
+            n2l = math.sqrt(sum(v * v for v in l2))
+            l2 = [v / n2l for v in l2]
+        else:
+            l2 = [0.0, 0.0, 1.0]
+            dot = l2[0] * l1[0] + l2[1] * l1[1] + l2[2] * l1[2]
+            l2 = [l2[0] - dot * l1[0], l2[1] - dot * l1[1], l2[2] - dot * l1[2]]
+            n2l = math.sqrt(sum(v * v for v in l2))
+            l2 = [v / n2l for v in l2]
+        l3 = [l1[1] * l2[2] - l1[2] * l2[1],
+              l1[2] * l2[0] - l1[0] * l2[2],
+              l1[0] * l2[1] - l1[1] * l2[0]]
+        return l1 + l2 + l3
 
     for bid, bdata in buildings.items():
         cfg = configs[bid]
         print(f"\n=== {bid}: {cfg['nombre']} ===")
-        results, ws = analyze_building(bid, bdata, cfg)
+        results, ws, desplazamientos = analyze_building(bid, bdata, cfg)
         r = bdata["resumen"]
         print(f"  [QA] {bid}: nodos={r['nodos']} col={r['columnas']} "
               f"vigas={r['vigas']} muros={r['muros']} losa={r['losa_area_m2']} m2")
 
+        material = cfg.get("material", "H30")
+        elev_lvl = {lv["id"]: lv["elevation"] for lv in cfg["niveles"]}
+        phase_lvl = {lv["id"]: lv["phase"] for lv in cfg["niveles"]}
+
         for nid, nd in bdata["nodes"].items():
+            d = desplazamientos[nid]
             all_nodes.append({
                 "id": nid, "building": bid,
                 "x": nd["x"], "y": nd["y"], "z": nd["z"],
                 "floor": nd["floor"], "phase": nd["phase"],
                 "fix": nd.get("fix", [0] * 6),
+                "dx": d[0], "dy": d[1], "dz": d[2],
             })
         for eid, ed in bdata["elements"].items():
+            n1 = bdata["nodes"][ed["nodes"][0]]
+            n2 = bdata["nodes"][ed["nodes"][1]]
+            axes = local_axes(n1, n2)
             all_elements.append({
                 "id": eid, "building": bid,
                 "type": ed["type"], "nodes": ed["nodes"],
@@ -255,22 +343,76 @@ def run_staged_analysis():
                 "phase": ed["phase"], "trib_area": ed["trib_area"],
                 "w_G": ed["w_G"], "w_Q": ed["w_Q"],
                 "length": ed["length"], "orient": ed["orient"], "lvl": ed["lvl"],
+                "material": material, "local": axes,
             })
         for eid, r in results.items():
+            P_dem = -r["N"][0]
+            M_dem = max(math.hypot(r["Mz"][0], r["My"][0]),
+                        math.hypot(r["Mz"][1], r["My"][1]))
             all_results.append({
                 "id": eid, "building": bid,
                 "N": r["N"], "Vy": r["Vy"], "Mz": r["Mz"],
+                "T": r["T"], "My": r["My"], "Vz": r["Vz"],
+                "P": round(P_dem, 2), "M": round(M_dem, 2),
             })
+        if "PILAR-70x70" in capstore:
+            add_pm("PILAR-70x70", capstore["PILAR-70x70"])
+            add_pm("P-70x70", capstore["PILAR-70x70"])
+        if "M-20" in capstore:
+            add_pm("M-20", capstore["M-20"])
 
-    pm_capacity = {
-        "P": [11978.4, 9826.8, 4884.2, 0.0, -1649.3],
-        "M": [0.0, 631.3, 1277.5, 513.2, 0.0],
-    }
+        # Losas: un rectangulo por nivel (poligono del trazado completo)
+        gx = [g["x"] for g in cfg["grilla_X"]]
+        gy = [g["y"] for g in cfg["grilla_Y"]]
+        xmin_all, xmax_all = min(gx), max(gx)
+        ymin_all, ymax_all = min(gy), max(gy)
+        lay = cfg.get("modalidad_losa", "rect")
+        for lvl in cfg.get("niveles_losa", []):
+            if lvl not in elev_lvl:
+                continue
+            all_slabs.append({
+                "building": bid, "lvl": lvl,
+                "x": [xmin_all, xmax_all, xmax_all, xmin_all],
+                "y": [ymin_all, ymin_all, ymax_all, ymax_all],
+                "z": round(elev_lvl[lvl], 3),
+                "e": cfg.get("losa_e", 0.15),
+                "phase": phase_lvl.get(lvl, 1),
+                "qG": next((lv["qG"] for lv in cfg["niveles"] if lv["id"] == lvl), 0.0) or 0.0,
+                "qQ": next((lv["qQ"] for lv in cfg["niveles"] if lv["id"] == lvl), 0.0) or 0.0,
+                "area": round((xmax_all - xmin_all) * (ymax_all - ymin_all), 2),
+            })
+        for vol in cfg.get("voladizos", []):
+            lvl = vol["nivel"]
+            if lvl not in elev_lvl:
+                continue
+            all_voladizos.append({
+                "building": bid, "id": vol.get("id", "VOL"),
+                "lvl": lvl,
+                "x": [vol["x_min"], vol["x_max"], vol["x_max"], vol["x_min"]],
+                "y": [vol["y_min"], vol["y_min"], vol["y_max"], vol["y_max"]],
+                "z": round(elev_lvl[lvl], 3),
+                "e": cfg.get("losa_e", 0.15),
+                "phase": phase_lvl.get(lvl, 1),
+                "area": round((vol["x_max"] - vol["x_min"]) * (vol["y_max"] - vol["y_min"]), 2),
+            })
+        for nid, nd in bdata["nodes"].items():
+            fix = nd.get("fix", [0] * 6)
+            if fix[0]:
+                all_apoyos.append({
+                    "node": nid, "building": bid,
+                    "fix": fix, "z": nd["z"],
+                })
+
     final_output = {
+        "schema": "structural_data/1.1",
         "nodes": all_nodes,
         "elements": all_elements,
         "results": all_results,
+        "slabs": all_slabs,
+        "voladizos": all_voladizos,
+        "apoyos": all_apoyos,
         "pm_capacity": pm_capacity,
+        "combinacion": build_combinacion_nombre(configs),
     }
     unity_json_path = "visualization/Assets/StreamingAssets/structural_data.json"
     os.makedirs(os.path.dirname(unity_json_path), exist_ok=True)
@@ -284,6 +426,7 @@ def run_staged_analysis():
     print(f"\n=== TOTAL ED1+ED2 ===")
     print(f"  nodos={total_n} col={total_c} vigas={total_v} muros={total_m}")
     print(f"  elementos exportados: {len(all_elements)}")
+    print(f"  losas exportadas: {len(all_slabs)}, voladizos: {len(all_voladizos)}")
     print(f"\n[OK] JSON exportado a: {unity_json_path}")
     print("\n-------------------------------------------")
     print(">>> RESULTADO: PASO 3 COMPLETADO CON EXITO <<<")

@@ -86,13 +86,16 @@ public class AutoSceneBuilder {
         rtLeg.pivot = new Vector2(1, 1);
         rtLeg.anchoredPosition = new Vector2(-20, -20);
         rtLeg.sizeDelta = new Vector2(220, 80);
-        txtLeg.text = "ED1 + ED2 (2024_22 + 2017_67)\nAZUL: columna\nNARANJA: viga\nVERDE: muro\nClaro: fase 1  Oscuro: fase 2";
+        txtLeg.text = "ED1 + ED2 (2024_22 + 2017_67)\nAZUL:col  NARANJA:vig  VERDE:muro\nClaro:fase1  Oscuro:fase2\n\nD: deformada   M: momentos\nN: axial   Click: seleccionar y PM";
 
         // 3. Manager Estructural
-        GameObject manager = new GameObject("StructuralManager", typeof(StructuralLoader), typeof(UIInspector));
+        GameObject manager = new GameObject("StructuralManager", typeof(StructuralLoader), typeof(UIInspector), typeof(PostProcessing));
         UIInspector inspector = manager.GetComponent<UIInspector>();
         inspector.txtElementInfo = txtInfo;
         inspector.pmPlotCanvas = rawImg;
+        inspector.loader = manager.GetComponent<StructuralLoader>();
+        PostProcessing pp = manager.GetComponent<PostProcessing>();
+        pp.loader = manager.GetComponent<StructuralLoader>();
 
         EditorSceneManager.SaveScene(scene, "Assets/Scenes/MainScene.unity");
         EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(scene.path, true) };

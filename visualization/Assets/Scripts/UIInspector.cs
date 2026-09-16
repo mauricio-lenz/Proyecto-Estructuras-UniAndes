@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,6 +13,18 @@ public class UIInspector : MonoBehaviour {
 
     void Awake() {
         if (loader == null) loader = GetComponent<StructuralLoader>();
+        SetupPanel();
+    }
+
+    /// <summary>Ancho grande + fuente monoespaciada para que la tabla numérica quede alineada.</summary>
+    void SetupPanel() {
+        if (txtElementInfo == null) return;
+        var rt = txtElementInfo.rectTransform;
+        if (rt != null) rt.sizeDelta = new Vector2(600f, 700f);
+        Font mono = null;
+        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 15); }
+        catch (System.Exception) { }
+        if (mono != null) txtElementInfo.font = mono;
     }
 
     void Update() {
@@ -72,43 +86,104 @@ public class UIInspector : MonoBehaviour {
         string tipo = el.elementType == "column" ? "COLUMNA"
                     : el.elementType == "wall"   ? "MURO" : "VIGA";
         string fixStr = "";
-        if (loader != null) {
-            if (el.nodeIds != null && el.nodeIds.Count >= 2) {
-                if (loader.nodeById.TryGetValue(el.nodeIds[0], out var n1)) fixStr += "i:{" + ListInt(n1.fix) + "}";
-                if (loader.nodeById.TryGetValue(el.nodeIds[1], out var n2)) fixStr += "  j:{" + ListInt(n2.fix) + "}";
+        if (loader != null && el.nodeIds != null && el.nodeIds.Count >= 2) {
+            if (loader.nodeById.TryGetValue(el.nodeIds[0], out var n1)) fixStr += "i:{" + ListInt(n1.fix) + "}";
+            if (loader.nodeById.TryGetValue(el.nodeIds[1], out var n2)) fixStr += "  j:{" + ListInt(n2.fix) + "}";
+        }
+
+        string comb = (loader != null && loader.data != null) ? loader.data.combinacion : "---";
+        const string line = "----------------------------------------------------------------";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"== {el.building}  {tipo}  ·  TAG {el.elementTag} ==");
+        sb.AppendLine($"CAD    : {el.cadID}");
+        sb.AppendLine($"Seccion: {el.sectionTag}   Material: {el.material}");
+        sb.AppendLine($"Nivel  : {el.lvl}   Fase: {el.phase}   Largo: {el.length:F2} m   Orient: {el.orient}");
+        sb.AppendLine($"Nodos  : {Nodelist(el)}   Restricciones: {fixStr}");
+        sb.AppendLine(line);
+
+        sb.AppendLine("CARGAS GRAVITATORIAS");
+        sb.AppendLine($"  Area tributaria      : {el.tribArea,12:F3} m2");
+        sb.AppendLine($"  w_G (por metro)      : {el.wG,12:F3} kN/m");
+        sb.AppendLine($"  w_Q (por metro)      : {el.wQ,12:F3} kN/m");
+        sb.AppendLine($"  G = w_G x L          : {el.wG * el.length,12:F2} kN");
+        sb.AppendLine($"  Q = w_Q x L          : {el.wQ * el.length,12:F2} kN");
+        sb.AppendLine(line);
+
+        sb.AppendLine($"FUERZAS INTERNAS   [{comb}]");
+        sb.AppendLine("  Fuerza          i            j        Max|.|    Unidad");
+        AppendForce(sb, "N",    el.N,  "kN");
+        AppendForce(sb, "Vy",   el.Vy, "kN");
+        AppendForce(sb, "Vz",   el.Vz, "kN");
+        AppendForce(sb, "T",    el.T,  "kN-m");
+        AppendForce(sb, "My",   el.My, "kN-m");
+        AppendForce(sb, "Mz",   el.Mz, "kN-m");
+        sb.AppendLine(line);
+
+        sb.AppendLine("DEMANDA / CAPACIDAD (P-M)");
+        sb.AppendLine($"  P (compresion +)     : {el.demandP,12:F2} kN");
+        sb.AppendLine($"  M (flexion)          : {el.demandM,12:F2} kN-m");
+        float mcap;
+        float dc = ComputeDC(el, out mcap);
+        if (!float.IsNaN(dc)) {
+            sb.AppendLine($"  M capacidad en P     : {mcap,12:F2} kN-m");
+            sb.AppendLine($"  D/C = M_dem / M_cap  : {dc,12:F3}   {(dc <= 1f ? "OK" : "*** EXCEDE ***")}");
+        } else {
+            sb.AppendLine("  (sin curva P-M: seccion de viga -> revisar Mz envolvente)");
+        }
+        sb.AppendLine(line);
+        sb.AppendLine("Clic derecho: rotar   Rueda: zoom   F: reencuadrar");
+        txtElementInfo.text = sb.ToString();
+    }
+
+    static void AppendForce(StringBuilder sb, string name, List<float> v, string unit) {
+        if (v == null || v.Count < 2) return;
+        float vi = v[0], vj = v[1];
+        float mx = Mathf.Max(Mathf.Abs(vi), Mathf.Abs(vj));
+        sb.AppendLine($"  {name,-7} {vi,12:F2} {vj,12:F2} {mx,12:F2}    {unit}");
+    }
+
+    static string Nodelist(ElementMono el) {
+        if (el.nodeIds == null || el.nodeIds.Count < 2) return "-";
+        return $"{el.nodeIds[0]} -> {el.nodeIds[1]}";
+    }
+
+    /// <summary>D/C = M_demanda / M_capacidad interpolada en P=demandP. NaN si no aplica.</summary>
+    float ComputeDC(ElementMono el, out float mcap) {
+        mcap = float.NaN;
+        if (loader == null || loader.data == null || loader.data.pm_capacity == null) return float.NaN;
+        if (el.elementType != "column" && el.elementType != "wall") return float.NaN;
+        string fallback = el.elementType == "column" ? "PILAR-70x70" : "M-20";
+        PMCapacityEntry cap = null;
+        foreach (var e in loader.data.pm_capacity) {
+            if (e.section == el.sectionTag) { cap = e; break; }
+        }
+        if (cap == null) {
+            foreach (var e in loader.data.pm_capacity) {
+                if (e.section == fallback) { cap = e; break; }
             }
         }
-        string info = "";
-        info += $"EDIFICIO: {el.building}\n";
-        info += $"TAG: {el.elementTag}\n";
-        info += $"NOMBRE: {el.cadID}\n";
-        info += $"TIPO: {tipo}   SECCION: {el.sectionTag}\n";
-        info += $"MATERIAL: {el.material}\n";
-        info += $"NIVEL: {el.lvl}   FASE: {el.phase}\n";
-        info += $"ORIENTACION: {el.orient}   LARGO: {el.length:F2} m\n";
-        info += $"AREA TRIBUTARIA: {el.tribArea:F2} m2\n";
-        info += $"w_G: {el.wG:F2} kN/m   w_Q: {el.wQ:F2} kN/m\n";
-        info += $"RESTRICCIONES: {fixStr}\n";
-        info += $"EJE LOCAL L1: ({F3(el.localL1)})\n";
-        info += $"EJE LOCAL L2: ({F3(el.localL2)})\n";
-        info += $"EJE LOCAL L3: ({F3(el.localL3)})\n\n";
-        info += $"--- COMBINACION: {(loader != null && loader.data != null ? loader.data.combinacion : "---")} ---\n";
-        if (el.N != null && el.N.Count >= 2)
-            info += $"N  : {el.N[0]:F2}  /  {el.N[1]:F2} kN\n";
-        if (el.Vy != null && el.Vy.Count >= 2)
-            info += $"Vy : {el.Vy[0]:F2}  /  {el.Vy[1]:F2} kN\n";
-        if (el.Vz != null && el.Vz.Count >= 2)
-            info += $"Vz : {el.Vz[0]:F2}  /  {el.Vz[1]:F2} kN\n";
-        if (el.T != null && el.T.Count >= 2)
-            info += $"T  : {el.T[0]:F2}  /  {el.T[1]:F2} kN-m\n";
-        if (el.My != null && el.My.Count >= 2)
-            info += $"My : {el.My[0]:F2}  /  {el.My[1]:F2} kN-m\n";
-        if (el.Mz != null && el.Mz.Count >= 2)
-            info += $"Mz : {el.Mz[0]:F2}  /  {el.Mz[1]:F2} kN-m\n\n";
-        info += $"DEMANDA P (compresion +): {el.demandP:F2} kN\n";
-        info += $"DEMANDA M (flexion): {el.demandM:F2} kN-m\n";
-        info += $"OpenSees elementTag: {el.elementTag}";
-        txtElementInfo.text = info;
+        if (cap == null || cap.P == null || cap.M == null || cap.P.Count < 2) return float.NaN;
+        float mc = InterpCapacityM(cap, el.demandP);
+        if (mc <= 1e-6f) return float.NaN;
+        mcap = mc;
+        return Mathf.Abs(el.demandM) / mc;
+    }
+
+    static float InterpCapacityM(PMCapacityEntry cap, float p) {
+        var P = cap.P;
+        var M = cap.M;
+        for (int i = 0; i < P.Count - 1; i++) {
+            float p0 = P[i], p1 = P[i + 1];
+            float lo = Mathf.Min(p0, p1), hi = Mathf.Max(p0, p1);
+            if (p >= lo && p <= hi) {
+                float t = Mathf.Abs(p1 - p0) < 1e-6f ? 0f : (p - p0) / (p1 - p0);
+                return Mathf.Lerp(M[i], M[i + 1], t);
+            }
+        }
+        // fuera de rango: usar el extremo mas cercano
+        if (p < Mathf.Min(P[0], P[P.Count - 1])) return M[P[0] < P[P.Count - 1] ? 0 : P.Count - 1];
+        return M[P[0] > P[P.Count - 1] ? 0 : P.Count - 1];
     }
 
     void DrawPmPlot(ElementMono el) {

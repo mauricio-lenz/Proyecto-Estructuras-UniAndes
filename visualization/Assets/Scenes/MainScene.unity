@@ -227,6 +227,7 @@ GameObject:
   - component: {fileID: 693631355}
   - component: {fileID: 693631354}
   - component: {fileID: 693631353}
+  - component: {fileID: 693631356}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -308,6 +309,22 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &693631356
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 693631352}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e6d5c4a3f2109876543210fedcba98, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ViewerCamera
+  rotateSpeed: 0.4
+  minDistance: 8
+  maxDistance: 500
+  frameOnStart: 1
 --- !u!1 &1136708812
 GameObject:
   m_ObjectHideFlags: 0
@@ -717,7 +734,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: 'ED1 + ED2 (2024_22 + 2017_67)
+  m_Text: 'ED1 + ED2 (2017_67 + 2024_22)
 
     AZUL: columna
 
@@ -730,7 +747,9 @@ MonoBehaviour:
 
     D: deformada   M: momentos
 
-    N: axial   Click: seleccionar y PM'
+    N: axial   Click: seleccionar y PM
+
+    Der:rotar  Rueda:zoom  F:encuadrar'
 --- !u!222 &2031647132
 CanvasRenderer:
   m_ObjectHideFlags: 0

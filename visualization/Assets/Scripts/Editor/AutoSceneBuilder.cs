@@ -26,12 +26,12 @@ public class AutoSceneBuilder {
         //    Unity: x = plan x, y = elev (model z), z = plan y
         //    ED1: plan x [8.932, 53.932], elev [0, 19.8], plan y [62.88, 79.031]
         //    ED2: plan x [11.1, 42.35],  elev [-7.97, 11.83], plan y [10.93, 27.08]
-        //    Cámara P1L2: pos (30, 45, 95), lookAt (30, 4, 45) — encuadra ambos edificios.
-        Vector3 lookAt = new Vector3(30f, 4f, 45f);
-        GameObject camObj = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
+        //    Cámara orbital (ViewerCamera) que auto-encuadra AMBOS edificios:
+        //    pitch 35°, yaw 45°, distancia = extents.magnitude * 1.6 (igual que P1L2).
+        GameObject camObj = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener), typeof(ViewerCamera));
         camObj.tag = "MainCamera";
         camObj.transform.position = new Vector3(30f, 45f, 95f);
-        camObj.transform.LookAt(lookAt);
+        camObj.transform.LookAt(new Vector3(30f, 4f, 45f));
         camObj.GetComponent<Camera>().farClipPlane = 2000f;
 
         GameObject lightObj = new GameObject("Directional Light", typeof(Light));
@@ -86,7 +86,7 @@ public class AutoSceneBuilder {
         rtLeg.pivot = new Vector2(1, 1);
         rtLeg.anchoredPosition = new Vector2(-20, -20);
         rtLeg.sizeDelta = new Vector2(220, 80);
-        txtLeg.text = "ED1 + ED2 (2024_22 + 2017_67)\nAZUL:col  NARANJA:vig  VERDE:muro\nClaro:fase1  Oscuro:fase2\n\nD: deformada   M: momentos\nN: axial   Click: seleccionar y PM";
+        txtLeg.text = "ED1 + ED2 (2017_67 + 2024_22)\nAZUL:col  NARANJA:vig  VERDE:muro\nClaro:fase1  Oscuro:fase2\n\nD: deformada   M: momentos\nN: axial   Click: seleccionar y PM\nDer:rotar  Rueda:zoom  F:encuadrar";
 
         // 3. Manager Estructural
         GameObject manager = new GameObject("StructuralManager", typeof(StructuralLoader), typeof(UIInspector), typeof(PostProcessing));

@@ -23,7 +23,8 @@ public class UIInspector : MonoBehaviour {
     private Texture2D pmTex;
     private Texture2D diagTex;
 
-    private Rect winRect = new Rect(16f, 16f, 680f, 700f);
+    private Rect winRect = new Rect(16f, 16f, 620f, 520f);
+    private Vector2 scrollPos;
     private string lastUICase = "__init__";
 
     private GUIStyle stHeader;
@@ -52,8 +53,6 @@ public class UIInspector : MonoBehaviour {
         // controles uGUI que se crearon para el panel anterior.
         if (txtElementInfo != null) txtElementInfo.gameObject.SetActive(false);
         if (pmPlotCanvas != null) pmPlotCanvas.gameObject.SetActive(false);
-        winRect = new Rect(16f, 16f, 680f,
-                           Mathf.Min(700f, Mathf.Max(480f, Screen.height - 32f)));
     }
 
     void InitStyles() {
@@ -118,26 +117,48 @@ public class UIInspector : MonoBehaviour {
 
     void OnGUI() {
         if (!panelVisible) return;
+        float w = Mathf.Clamp(Screen.width - 16f, 400f, 660f);
+        float h = Mathf.Clamp(Screen.height - 36f, 380f, 560f);
+        winRect.width = w;
+        winRect.height = h;
+        winRect.x = Mathf.Clamp(winRect.x, 0f, Mathf.Max(0f, Screen.width - w));
+        winRect.y = Mathf.Clamp(winRect.y, 0f, Mathf.Max(0f, Screen.height - h));
         winRect = GUI.Window(0, winRect, WindowFunc, "INSPECCION ESTRUCTURAL  ·  P1L4 (ED1+ED2)");
     }
 
     void WindowFunc(int id) {
-        GUI.DragWindow(new Rect(0f, 0f, winRect.width, 28f));
-        GUILayout.Space(4f);
+        GUI.DragWindow(new Rect(0f, 0f, winRect.width, 26f));
+        GUILayout.Space(6f);
+
+        // Contenido con scroll para que la ventana quepa siempre en el viewport
+        // y nunca cubra toda la pantalla (la interaccion con la escena queda libre).
+        scrollPos = GUILayout.BeginScrollView(scrollPos,
+            GUILayout.Width(winRect.width - 16f),
+            GUILayout.Height(winRect.height - 36f));
 
         if (selectedSlab != null) {
             DrawSlabInfo();
-            return;
-        }
-        if (selected == null) {
-            GUILayout.FlexibleSpace();
-            GUILayout.Label("Seleccione un elemento de la estructura (clic izquierdo).\n\n" +
-                            "Tambien puede seleccionar losas y voladizos con la tecla L.\n" +
-                            "Teclas:  D deformada · M momentos · N axial · C cambiar caso · P ocultar.", stBold);
-            GUILayout.FlexibleSpace();
-            return;
+        } else if (selected == null) {
+            DrawPlaceholder();
+        } else {
+            DrawElementInfo();
         }
 
+        GUILayout.Space(10f);
+        GUILayout.EndScrollView();
+    }
+
+    void DrawPlaceholder() {
+        GUILayout.Space(40f);
+        GUILayout.Label("Seleccione un elemento de la estructura (clic izquierdo).", stBold);
+        GUILayout.Space(6f);
+        GUILayout.Label("Tambien puede seleccionar losas y voladizos con la tecla L.", stLabel);
+        GUILayout.Space(12f);
+        GUILayout.Label("Teclas: D deformada · M momentos · N axial · C cambiar caso · F encuadrar", stLabel);
+        GUILayout.Label("Ventana arrastrable por su titulo. Cierra con P.", stLabel);
+    }
+
+    void DrawElementInfo() {
         string caso = (loader != null && loader.activeCase != null)
             ? case_display(loader.activeCase)
             : (loader != null && loader.data != null ? loader.data.combinacion : "---");
@@ -210,21 +231,16 @@ public class UIInspector : MonoBehaviour {
         EnsureTextures();
         GUILayout.BeginHorizontal();
         if (diagTex != null) {
-            var rd = GUILayoutUtility.GetRect(300f, 260f);
+            var rd = GUILayoutUtility.GetRect(280f, 220f);
             GUI.DrawTexture(rd, diagTex, ScaleMode.ScaleToFit);
         }
         if (pmTex != null) {
-            var rp = GUILayoutUtility.GetRect(300f, 260f);
+            var rp = GUILayoutUtility.GetRect(280f, 220f);
             GUI.DrawTexture(rp, pmTex, ScaleMode.ScaleToFit);
         }
         GUILayout.EndHorizontal();
-
-        GUILayout.FlexibleSpace();
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Click: seleccionar   L: losas   P: ocultar   C: caso", stLabel);
-        GUILayout.Label("D/M/N: diagramas   F: encuadrar", stLabel);
-        GUILayout.EndHorizontal();
-        GUILayout.Space(2f);
+        GUILayout.Space(8f);
+        GUILayout.Label("Click: seleccionar · L: losas · D/M/N: diagramas · F: encuadrar", stLabel);
     }
 
     void DrawSlabInfo() {
@@ -249,11 +265,8 @@ public class UIInspector : MonoBehaviour {
         GUILayout.Box("La losa contribuye a los pesos sismicos W y transmite sus cargas " +
                       "a vigas y columnas. No aplica curva P-M ni fuerzas internas.", wrap,
                       GUILayout.ExpandWidth(true));
-        GUILayout.FlexibleSpace();
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Click: seleccionar   L: losas   P: ocultar", stLabel);
-        GUILayout.EndHorizontal();
-        GUILayout.Space(2f);
+        GUILayout.Space(8f);
+        GUILayout.Label("Click: seleccionar · L: losas · P: ocultar", stLabel);
     }
 
     string case_display(string c) {

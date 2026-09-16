@@ -18,16 +18,16 @@ public class UIInspector : MonoBehaviour {
     }
 
     /// <summary>
-    /// Agranda el panel, sube la fuente monoespaciada y coloca un fondo blanco
-    /// semitransparente detrás del texto para que la tabla se lea sin tapar la
-    /// estructura (panel al borde izquierdo; tecla P lo oculta/muestra).
+    /// Panel compacto: ancho medio fijo, alto 70% de la pantalla, fuente
+    /// monoespaciada grande y fondo blanco semitransparente. No tapa la
+    /// estructura (queda al borde izquierdo; tecla P lo oculta/muestra).
     /// </summary>
     void SetupPanel() {
         if (txtElementInfo == null) return;
         var rt = txtElementInfo.rectTransform;
         if (rt != null) {
-            float w = Mathf.Clamp(Screen.width * 0.45f, 640f, 1100f);
-            float h = Mathf.Clamp(Screen.height - 170f, 500f, 1200f);
+            float w = Mathf.Clamp(Screen.width * 0.4f, 600f, 740f);
+            float h = Mathf.Clamp(Screen.height * 0.7f, 560f, 920f);
             rt.sizeDelta = new Vector2(w, h);
             rt.anchorMin = new Vector2(0f, 1f);
             rt.anchorMax = new Vector2(0f, 1f);
@@ -35,11 +35,11 @@ public class UIInspector : MonoBehaviour {
             rt.anchoredPosition = new Vector2(16f, -16f);
         }
         txtElementInfo.color = new Color(0.05f, 0.05f, 0.1f, 1f);
-        txtElementInfo.fontSize = 20;
+        txtElementInfo.fontSize = 22;
         txtElementInfo.lineSpacing = 1.05f;
         txtElementInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
         Font mono = null;
-        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 20); }
+        try { mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Courier New", "DejaVu Sans Mono" }, 22); }
         catch (System.Exception) { }
         if (mono != null) txtElementInfo.font = mono;
         EnsureBackground(rt);
@@ -61,7 +61,7 @@ public class UIInspector : MonoBehaviour {
                                     typeof(CanvasRenderer), typeof(Image));
             go.transform.SetParent(parent, false);
             bg = go.GetComponent<Image>();
-            bg.color = new Color(1f, 1f, 1f, 0.93f);
+            bg.color = new Color(1f, 1f, 1f, 0.88f);
             bg.raycastTarget = false;
             bg.transform.SetAsFirstSibling();
         }

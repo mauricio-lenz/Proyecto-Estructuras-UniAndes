@@ -60,7 +60,7 @@ public class AutoSceneBuilder {
         rtInfo.anchorMax = new Vector2(0, 1);
         rtInfo.pivot = new Vector2(0, 1);
         rtInfo.anchoredPosition = new Vector2(16, -16);
-        rtInfo.sizeDelta = new Vector2(900, 1000);
+        rtInfo.sizeDelta = new Vector2(640, 760);
         txtInfo.text = "Haz clic en un elemento de la estructura...";
 
         // Gráfico P-M RawImage

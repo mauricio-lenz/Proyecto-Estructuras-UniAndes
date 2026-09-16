@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Unity
+visualization/Library/
+visualization/Logs/
+visualization/Temp/
+visualization/Obj/
+visualization/UserSettings/
+visualization/Packages/
+visualization/ProjectSettings/
+visualization/*.csproj
+visualization/*.sln
+
+# CAD (grandes, regenerables desde fuentes)
+cad_files/**/*.dxf
+cad_files/**/*.dwg
+
+# Resultados derivados
+*.log

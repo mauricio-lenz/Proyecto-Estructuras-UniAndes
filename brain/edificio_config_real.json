@@ -1,0 +1,53 @@
+{
+  "id": "ED2",
+  "nombre": "Edificio 2 - 2024_22",
+  "proyecto": "2024_22",
+  "material": "H35",
+  "gamma": 25.0,
+  "grilla_X": [
+    { "eje": "A'", "x": 11.10 },
+    { "eje": "A", "x": 14.85 },
+    { "eje": "B", "x": 22.35 },
+    { "eje": "C", "x": 32.35 },
+    { "eje": "C'", "x": 39.93 },
+    { "eje": "D", "x": 42.35 }
+  ],
+  "grilla_Y": [
+    { "eje": "3", "y": 10.93 },
+    { "eje": "2", "y": 18.18 },
+    { "eje": "1", "y": 27.08 }
+  ],
+  "niveles": [
+    { "id": "radier", "elevation": -7.97, "qG": null, "qQ": null, "phase": 1 },
+    { "id": "sub1", "elevation": -4.01, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "piso1", "elevation": -0.05, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "piso2", "elevation": 3.91, "qG": 5.25, "qQ": 2.942, "phase": 1 },
+    { "id": "piso3", "elevation": 7.87, "qG": 5.25, "qQ": 2.942, "phase": 2 },
+    { "id": "piso4", "elevation": 11.83, "qG": 4.25, "qQ": 2.942, "phase": 2 }
+  ],
+  "niveles_losa": ["sub1", "piso1", "piso2", "piso3", "piso4"],
+  "seccion_columna": "PILAR-70x70",
+  "seccion_viga": "V-60x80",
+  "seccion_viga_secundaria": "V-45x30",
+  "seccion_viga_borde": "V-40x80",
+  "seccion_muro": "M-20",
+  "muros_e": 0.20,
+  "muros_ejes": [
+    { "direccion": "Y", "eje": "D" },
+    { "direccion": "X", "eje": "2" }
+  ],
+  "columnas_cruces": [
+    ["A", "3"], ["B", "3"], ["C", "3"], ["D", "3"],
+    ["A", "1"], ["B", "1"], ["C", "1"], ["D", "1"]
+  ],
+  "losa_e": 0.15,
+  "voladizos": [],
+  "cargas": {
+    "g": 9.81,
+    "sismo": {
+      "fraccion_g": 0.20,
+      "fraccion_sobrecarga_masa": 0.50
+    },
+    "superposicion_lambdas": { "G": 1.0, "Q": 1.0, "EX": 0.9, "EY": 0.75 }
+  }
+}

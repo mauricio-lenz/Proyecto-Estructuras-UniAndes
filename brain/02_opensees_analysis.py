@@ -298,10 +298,28 @@ def run_staged_analysis():
         "P": [11978.4, 9826.8, 4884.2, 0.0, -1649.3],
         "M": [0.0, 631.3, 1277.5, 513.2, 0.0],
     }
+    nodes_out = []
+    for nid, nd in data["nodes"].items():
+        nodes_out.append({
+            "id": nid, "x": nd["x"], "y": nd["y"], "z": nd["z"],
+            "floor": nd["floor"], "phase": nd["phase"], "fix": nd.get("fix", [0]*6),
+        })
+    elements_out = []
+    for eid, ed in data["elements"].items():
+        elements_out.append({
+            "id": eid, "type": ed["type"], "nodes": ed["nodes"],
+            "sectionTag": ed["sectionTag"], "cad_id": ed["cad_id"],
+            "phase": ed["phase"], "trib_area": ed["trib_area"],
+            "w_G": ed["w_G"], "w_Q": ed["w_Q"],
+            "length": ed["length"], "orient": ed["orient"], "lvl": ed["lvl"],
+        })
+    results_out = []
+    for eid, r in results.items():
+        results_out.append({"id": eid, "N": r["N"], "Vy": r["Vy"], "Mz": r["Mz"]})
     final_output = {
-        "nodes": data["nodes"],
+        "nodes": nodes_out,
         "elements": elements_out,
-        "results": results,
+        "results": results_out,
         "pm_capacity": pm_capacity,
     }
 

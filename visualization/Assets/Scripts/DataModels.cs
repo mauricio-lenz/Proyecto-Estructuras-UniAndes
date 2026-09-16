@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 [Serializable]
 public class NodeData {
+    public string id;
     public float x, y, z;
     public int floor;
     public int phase;
@@ -11,6 +12,7 @@ public class NodeData {
 
 [Serializable]
 public class ElementData {
+    public string id;
     public string type;
     public List<string> nodes;
     public string sectionTag;
@@ -19,10 +21,14 @@ public class ElementData {
     public float trib_area;
     public float w_G;
     public float w_Q;
+    public float length;
+    public string orient;
+    public string lvl;
 }
 
 [Serializable]
 public class ElementResult {
+    public string id;
     public List<float> N;
     public List<float> Vy;
     public List<float> Mz;
@@ -36,8 +42,8 @@ public class PMCapacity {
 
 [Serializable]
 public class StructuralDataset {
-    public Dictionary<string, NodeData> nodes;
-    public Dictionary<string, ElementData> elements;
-    public Dictionary<string, ElementResult> results;
+    public List<NodeData> nodes;
+    public List<ElementData> elements;
+    public List<ElementResult> results;
     public PMCapacity pm_capacity;
 }

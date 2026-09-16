@@ -45,6 +45,7 @@ public class StructuralLoader : MonoBehaviour {
         foreach (var n in data.nodes) {
             string b = string.IsNullOrEmpty(n.building) ? "ED1" : n.building;
             if (!mins.ContainsKey(b)) {
+                count[b] = 0;
                 mins[b] = new Vector2(float.MaxValue, float.MaxValue);
                 maxs[b] = new Vector2(float.MinValue, float.MinValue);
                 maxZ[b] = float.MinValue;

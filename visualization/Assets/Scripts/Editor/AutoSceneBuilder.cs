@@ -22,22 +22,22 @@ public class AutoSceneBuilder {
 
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        // 1. Cámara y Luz (apuntando al centro de ED1+ED2 juntos)
+        // 1. Cámara y Luz imitando el viewer P1L2 (CoordinateMap = espejo, sin traslación).
         //    Unity: x = plan x, y = elev (model z), z = plan y
         //    ED1: plan x [8.932, 53.932], elev [0, 19.8], plan y [62.88, 79.031]
         //    ED2: plan x [11.1, 42.35],  elev [-7.97, 11.83], plan y [10.93, 27.08]
-        Vector3 edCenter = new Vector3((8.932f + 53.932f) / 2f, (19.8f - 7.97f) / 2f, (10.93f + 79.031f) / 2f);
-        Vector3 lookAt = edCenter;
+        //    Cámara P1L2: pos (30, 45, 95), lookAt (30, 4, 45) — encuadra ambos edificios.
+        Vector3 lookAt = new Vector3(30f, 4f, 45f);
         GameObject camObj = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
         camObj.tag = "MainCamera";
-        camObj.transform.position = new Vector3(edCenter.x - 40f, 85f, edCenter.z + 70f);
+        camObj.transform.position = new Vector3(30f, 45f, 95f);
         camObj.transform.LookAt(lookAt);
         camObj.GetComponent<Camera>().farClipPlane = 2000f;
 
         GameObject lightObj = new GameObject("Directional Light", typeof(Light));
         Light light = lightObj.GetComponent<Light>();
         light.type = LightType.Directional;
-        lightObj.transform.rotation = Quaternion.Euler(35, -25, 0);
+        lightObj.transform.rotation = Quaternion.Euler(50, -30, 0);
 
         // 2. UI Canvas
         GameObject canvasObj = new GameObject("Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));

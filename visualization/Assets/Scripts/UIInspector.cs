@@ -9,7 +9,12 @@ public class UIInspector : MonoBehaviour {
     private ElementMono selected;
     private Material lastHighMat;
 
+    void Awake() {
+        if (loader == null) loader = GetComponent<StructuralLoader>();
+    }
+
     void Update() {
+        if (loader == null) loader = GetComponent<StructuralLoader>();
         if (Input.GetMouseButtonDown(0) && loader != null) {
             Ray ray = Camera.main != null
                 ? Camera.main.ScreenPointToRay(Input.mousePosition) : new Ray();

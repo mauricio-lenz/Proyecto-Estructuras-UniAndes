@@ -209,7 +209,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 322539063}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.29357788, y: -0.20642215, z: 0.06508465, w: 0.9311101}
+  m_LocalRotation: {x: 0.4082179, y: -0.23456972, z: 0.10938166, w: 0.8754261}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -274,7 +274,7 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 1000
+  far clip plane: 2000
   field of view: 60
   orthographic: 0
   orthographic size: 5
@@ -301,8 +301,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 693631352}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.22860384, y: -0.29795134, z: 0.07372579, w: 0.9238668}
-  m_LocalPosition: {x: 80, y: 55, z: -55}
+  m_LocalRotation: {x: 0, y: 0.9416124, z: -0.33669883, w: 0}
+  m_LocalPosition: {x: 30, y: 45, z: 95}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -424,6 +424,7 @@ GameObject:
   - component: {fileID: 1380866913}
   - component: {fileID: 1380866912}
   - component: {fileID: 1380866911}
+  - component: {fileID: 1380866914}
   m_Layer: 0
   m_Name: StructuralManager
   m_TagString: Untagged
@@ -445,6 +446,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::UIInspector
   txtElementInfo: {fileID: 1668611930}
   pmPlotCanvas: {fileID: 1664508897}
+  loader: {fileID: 1380866912}
+--- !u!114 &1380866914
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1380866910}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c135c47c560828d478f1a12cd3c01ee4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PostProcessing
+  loader: {fileID: 1380866912}
+  deformationScale: 30
+  momentScale: 0.003
+  shearScale: 0.001
 --- !u!114 &1380866912
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -699,14 +717,20 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: 'AZUL: columna
+  m_Text: 'ED1 + ED2 (2024_22 + 2017_67)
+
+    AZUL: columna
 
     NARANJA: viga
 
     VERDE: muro
 
     Claro: fase 1 
-    Oscuro: fase 2'
+    Oscuro: fase 2
+
+    D: deformada   M: momentos
+
+    N: axial   Click: seleccionar y PM'
 --- !u!222 &2031647132
 CanvasRenderer:
   m_ObjectHideFlags: 0
